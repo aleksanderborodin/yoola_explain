@@ -38,9 +38,9 @@ class Settings(BaseSettings):
     anchor_min_score: float = 85.0
     simhash_max_distance: int = 4
 
-    ip_daily_miss_budget: int = 10
-    global_daily_miss_budget: int = 200
-    global_daily_fetch_budget: int = 2000  # caps use of the server as a fetch amplifier
+    ip_daily_miss_budget: int = 50
+    global_daily_miss_budget: int = 1000
+    global_daily_fetch_budget: int = 10000  # caps use of the server as a fetch amplifier
     url_ttl_days: int = 7
 
     # Reports: distinct-IP threshold to mark a summary disputed (a warning, never
