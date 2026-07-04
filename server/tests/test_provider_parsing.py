@@ -12,7 +12,8 @@ from yoola.provider import OpenAICompatProvider, ProviderError
 
 class StubChatProvider(OpenAICompatProvider):
     def __init__(self, reply: str):
-        settings = Settings(_env_file=None, llm_api_key="stub")
+        # The field uses a validation_alias, so the env-var name is the kwarg.
+        settings = Settings(_env_file=None, YOOLA_LLM_API_KEY="stub")
         super().__init__(settings)
         self._reply = reply
 
