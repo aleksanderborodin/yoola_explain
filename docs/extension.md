@@ -81,4 +81,6 @@ for the quote text itself via `window.find`, shrinking the needle
 
 `API_BASE` should become an options-page setting; extraction fallback is crude
 (server-side fetch is the primary path, so this rarely matters); no
-Firefox port yet.
+Firefox port yet. Chrome's PDF viewer blocks content scripts entirely, so on a
+directly-opened PDF the pill/panel cannot appear and the popup explains the
+right-click-the-link route (the server itself summarizes PDFs fine).
