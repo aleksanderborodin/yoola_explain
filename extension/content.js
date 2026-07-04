@@ -3,8 +3,17 @@
 // until the user acts (tab, popup, or right-click).
 
 (() => {
-  if (window.__yoolaLoaded) return;
-  window.__yoolaLoaded = true;
+  // Re-injection guard with a LIVENESS check: after an extension reload the old
+  // content script is orphaned (its chrome.runtime dies) but its window flag
+  // survives — a plain boolean here would make the fresh injection bail and
+  // leave the tab deaf until F5. The old script's closure answers alive()=false.
+  try {
+    if (window.__yoolaAlive?.()) return;
+  } catch {
+    /* orphaned closure threw — proceed with fresh init */
+  }
+  window.__yoolaAlive = () => !!chrome.runtime?.id;
+  document.getElementById("yoola-host")?.remove(); // stale UI from the old script
 
   const SEVERITY_ORDER = { high: 0, medium: 1, low: 2 };
   const VERDICT = { A: "Fair terms", B: "Mostly fair", C: "Mixed terms", D: "Harsh terms", E: "Very harsh" };

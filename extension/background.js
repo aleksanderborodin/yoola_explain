@@ -97,8 +97,18 @@ async function handle(msg, sender) {
   }
   if (msg.type === "page-links") {
     // Legal links visible on the current page (footer Terms/Privacy etc.).
+    // An old content script answers undefined (no such handler) rather than
+    // throwing — treat that as "missing" and inject the current one.
     try {
-      return await sendToContent(msg.tabId, { type: "get-legal-links" });
+      let reply = await sendToContent(msg.tabId, { type: "get-legal-links" });
+      if (!reply?.links) {
+        await chrome.scripting.executeScript({
+          target: { tabId: msg.tabId },
+          files: ["detect.js", "content.js"],
+        });
+        reply = await chrome.tabs.sendMessage(msg.tabId, { type: "get-legal-links" });
+      }
+      return reply?.links ? reply : { links: [] };
     } catch {
       return { links: [] };
     }
