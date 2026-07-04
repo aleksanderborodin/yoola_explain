@@ -310,7 +310,7 @@
       border-left: 3px solid var(--brass-soft); border-radius: 10px; padding: 11px 13px;
       margin: 8px 0; cursor: pointer; color: var(--ink); font: inherit; }
     .pick:hover { box-shadow: 0 4px 12px rgba(60,50,20,.12); }
-    .pick-label { font-weight: 600; font-size: 13.5px; }
+    .pick-label { font-weight: 600; font-size: 13.5px; word-break: break-word; }
     .pick-host { color: var(--ink3); font-size: 11.5px; }
     .notice { border-radius: 10px; padding: 11px 13px; font-size: 13px; margin-bottom: 4px; }
     .notice.err { background: #F7E4E0; color: #8E2A1E; border: 1px solid #E5BFB7; }

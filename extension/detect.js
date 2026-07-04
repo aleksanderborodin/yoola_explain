@@ -80,7 +80,7 @@ async function yoolaInRegistry(href) {
 // rather than being the terms. If it links to legal documents, Yoola can
 // summarize the LINKED docs in place — the user never has to navigate away
 // (the server fetches by URL, so being on the page is never required).
-const YOOLA_LINK_TEXT = /(terms|conditions|privacy|policy|eula|licen[sc]e|agreement|правил|условия|конфиденциальн)/i;
+const YOOLA_LINK_TEXT = /(terms|conditions|privacy|policy|eula|licen[sc]e|agreement|правил|услови|соглашен|согласи|конфиденциальн|оферт|политик|персональн|обработк)/i;
 
 function yoolaConsentContext() {
   if (document.querySelector('input[type="password"]')) return true;
@@ -92,17 +92,36 @@ function yoolaConsentContext() {
   return false;
 }
 
+// Human label for a legal link: its text when it reads like one, else a
+// cleaned-up filename (decoded — Cyrillic paths must not show as %D0%BF…).
+function yoolaLinkLabel(a, textHit, text) {
+  if (textHit) return text.slice(0, 90);
+  const title = (a.getAttribute("title") ?? "").trim();
+  if (title) return title.slice(0, 90);
+  let segment = (a.pathname ?? "").split("/").filter(Boolean).pop() ?? "";
+  try {
+    segment = decodeURIComponent(segment);
+  } catch {
+    /* keep raw on malformed escapes */
+  }
+  segment = segment
+    .replace(/\.(pdf|docx?|html?|php|aspx?)$/i, "")
+    .replace(/[_\-+]+/g, " ")
+    .trim();
+  return segment.slice(0, 90) || "Legal document";
+}
+
 function yoolaFindLegalLinks() {
   const found = new Map(); // normalized url -> label
   for (const a of document.querySelectorAll("a[href]")) {
-    const text = (a.textContent ?? "").trim();
+    const text = (a.textContent ?? "").trim().replace(/\s+/g, " ");
     if (!text || text.length > 90) continue;
     const textHit = YOOLA_LINK_TEXT.test(text);
-    const hrefHit = YOOLA_URL_HINTS.test(a.pathname ?? "");
+    const hrefHit = YOOLA_URL_HINTS.test(a.pathname ?? "") || YOOLA_LINK_TEXT.test(a.pathname ?? "");
     if (!textHit && !hrefHit) continue;
     const url = yoolaNormalizeUrl(a.href);
     if (!url || url === yoolaNormalizeUrl(location.href)) continue;
-    if (!found.has(url)) found.set(url, textHit ? text : a.pathname);
+    if (!found.has(url)) found.set(url, yoolaLinkLabel(a, textHit, text));
     if (found.size >= 4) break;
   }
   return [...found].map(([url, label]) => ({ url, label }));
