@@ -4,7 +4,7 @@
 # Idempotent: safe to re-run for updates (it git-pulls and restarts).
 set -euo pipefail
 
-DOMAIN="${DOMAIN:-}"            # empty = HTTP-only on :80 (testing before DNS is ready)
+DOMAIN="${DOMAIN:-yoola-explain.aleksanderbor.ru}"  # DOMAIN= (empty) -> HTTP-only on :80
 LLM_KEY="${LLM_KEY:?set LLM_KEY=<modelgate key>}"
 REPO="${REPO:-https://github.com/aleksanderborodin/yoola_explain.git}"
 APP_DIR=/srv/yoola
@@ -35,6 +35,7 @@ YOOLA_GENERATOR_MODEL=gemma-4-31b
 YOOLA_VERIFIER_MODEL=gemma-4-31b
 YOOLA_DB_PATH=$APP_DIR/yoola.db
 YOOLA_TRUSTED_PROXY_HOPS=1
+YOOLA_ALLOWED_ORIGINS=["https://aleksanderborodin.github.io"]
 YOOLA_REPORT_SALT=$(head -c16 /dev/urandom | xxd -p)
 EOF
 chmod 600 "$APP_DIR/server/.env"

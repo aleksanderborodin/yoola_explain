@@ -1,7 +1,7 @@
 // Yoola service worker: the ONLY thing that talks to the server (Design v4 §5).
 // Owns the L1 cache, the badge, the right-click menu, and the registry sync.
 
-const API_BASE = "http://127.0.0.1:8000"; // switch to the deployed origin for release
+const API_BASE = "https://yoola-explain.aleksanderbor.ru"; // dev: "http://127.0.0.1:8000"
 const L1_MAX_ENTRIES = 50;
 const L1_REFRESH_DAYS = 7;
 const REGISTRY_SYNC_HOURS = 6;

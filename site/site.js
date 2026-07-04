@@ -2,7 +2,7 @@
 // Set YOOLA_API to the deployed server origin to make the directory live; the
 // static demo entries keep the site meaningful on GitHub Pages without it.
 
-const YOOLA_API = ""; // e.g. "https://api.yoola.example"
+const YOOLA_API = "https://yoola-explain.aleksanderbor.ru";
 
 // Real, unedited Yoola output (gemma-4-31b) — Mozilla's ToS and Yoola's own.
 const DEMO_ENTRIES = [
