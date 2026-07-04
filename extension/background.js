@@ -76,12 +76,18 @@ async function handle(msg, sender) {
   }
   if (msg.type === "popup-open-url") {
     try {
-      await sendToContent(msg.tabId, { type: "summarize-url", url: msg.url, label: msg.label });
+      await sendToContent(msg.tabId, {
+        type: "summarize-url",
+        url: msg.url,
+        label: msg.label,
+        list: msg.list, // the popup's dossier — lets the panel offer "← back to the list"
+      });
       return { ok: true };
     } catch {
       return { ok: false };
     }
   }
+  if (msg.type === "extract-remote") return extractViaTab(msg.url);
   if (msg.type === "site-agreements") {
     // What Yoola already knows about this host — instant, graded.
     try {
@@ -114,6 +120,74 @@ async function handle(msg, sender) {
     }
   }
   return { ok: false, detail: "unknown message" };
+}
+
+// Last-resort reader for documents the SERVER can't fetch (bot walls,
+// JS-rendered pages): open the URL in a background tab, let the user's own
+// browser render it, pull the text, close the tab. The text then goes through
+// the quarantined client_content path (never trusted as the URL's identity).
+// Fails cleanly on pages Chrome won't script (its PDF viewer, chrome://).
+async function extractViaTab(url) {
+  let tab;
+  try {
+    tab = await chrome.tabs.create({ url, active: false });
+    await waitForLoad(tab.id, 25000);
+    let text = await grabText(tab.id);
+    if ((text ?? "").length < 500) {
+      // likely an SPA still rendering after "complete" — one more chance
+      await new Promise((resolve) => setTimeout(resolve, 2500));
+      text = await grabText(tab.id);
+    }
+    return text && text.length >= 200 ? { ok: true, content: text } : { ok: false };
+  } catch {
+    return { ok: false };
+  } finally {
+    if (tab?.id != null) chrome.tabs.remove(tab.id).catch(() => {});
+  }
+}
+
+function waitForLoad(tabId, timeoutMs) {
+  const SETTLE_MS = 1200; // let scripts/fonts finish after "complete"
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      cleanup();
+      reject(new Error("load timeout"));
+    }, timeoutMs);
+    const onUpdated = (id, info) => {
+      if (id !== tabId || info.status !== "complete") return;
+      cleanup();
+      setTimeout(resolve, SETTLE_MS);
+    };
+    const cleanup = () => {
+      clearTimeout(timer);
+      chrome.tabs.onUpdated.removeListener(onUpdated);
+    };
+    chrome.tabs.onUpdated.addListener(onUpdated);
+    chrome.tabs.get(tabId).then((t) => {
+      if (t.status === "complete") {
+        cleanup();
+        setTimeout(resolve, SETTLE_MS);
+      }
+    }).catch(() => {});
+  });
+}
+
+async function grabText(tabId) {
+  // Self-contained func (mirrors detect.js#yoolaExtractText) — injecting
+  // detect.js here would redeclare its top-level consts in tabs that already
+  // have the content scripts and throw.
+  const [res] = await chrome.scripting.executeScript({
+    target: { tabId },
+    func: () => {
+      const root =
+        document.querySelector("main") ??
+        document.querySelector("article") ??
+        document.querySelector('[role="main"]') ??
+        document.body;
+      return (root?.innerText ?? "").trim().slice(0, 400000);
+    },
+  });
+  return res?.result ?? "";
 }
 
 async function summarize({ url, language, clientContent }) {

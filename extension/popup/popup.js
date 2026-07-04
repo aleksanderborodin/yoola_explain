@@ -28,36 +28,50 @@ async function init() {
     chrome.runtime.sendMessage({ type: "page-links", tabId: tab.id }),
   ]);
   const entries = known?.entries ?? [];
-  const knownUrls = new Set(entries.map((e) => e.url));
-  const candidates = (page?.links ?? []).filter((l) => !knownUrls.has(l.url));
+  // Dedup by where the link LEADS, not the raw string: both sides are
+  // normalized URLs, compared scheme/www-insensitively so a footer link and
+  // the stored document key match even when they're written differently.
+  const knownKeys = new Set(entries.map((e) => looseKey(e.url)));
+  const candidates = (page?.links ?? []).filter((l) => !knownKeys.has(looseKey(l.url)));
+
+  // Everything the panel needs to re-show this list in-page ("← back").
+  const dossier = [
+    ...entries.map((e) => ({ url: e.url, label: pathLabel(e.url), grade: e.grade, alerts: e.alerts })),
+    ...candidates.map((l) => ({ url: l.url, label: l.label, known: l.known })),
+  ];
 
   list.innerHTML = "";
-  for (const entry of entries) list.appendChild(gradedRow(entry, tab));
-  for (const link of candidates) list.appendChild(candidateRow(link, tab));
+  for (const entry of entries) list.appendChild(gradedRow(entry, tab, dossier));
+  for (const link of candidates) list.appendChild(candidateRow(link, tab, dossier));
   if (!list.children.length) {
     list.innerHTML = `<div class="muted">No agreements found here yet. Open a terms or
       privacy page (or use the button below) — once analyzed, it shows up for everyone.</div>`;
   }
 }
 
-function gradedRow(entry, tab) {
+// Scheme/www/trailing-slash-insensitive comparison key for a normalized URL.
+function looseKey(url) {
+  return url.replace(/^https?:\/\//, "").replace(/^www\./, "").replace(/\/+$/, "");
+}
+
+function gradedRow(entry, tab, dossier) {
   const label = pathLabel(entry.url);
   const row = row_(
     `<span class="stamp g-${entry.grade}"><span>${entry.grade}</span></span>`,
     label,
     `${VERDICT[entry.grade]} · ${entry.alerts} alert${entry.alerts === 1 ? "" : "s"}`
   );
-  row.addEventListener("click", () => openInPage(tab, entry.url, label));
+  row.addEventListener("click", () => openInPage(tab, entry.url, label, dossier));
   return row;
 }
 
-function candidateRow(link, tab) {
-  const row = row_(
-    `<span class="stamp new"><span>?</span></span>`,
-    link.label,
-    "Not analyzed yet — click to analyze"
-  );
-  row.addEventListener("click", () => openInPage(tab, link.url, link.label));
+function candidateRow(link, tab, dossier) {
+  // `known` = the registry says a summary exists for this exact URL (e.g. a
+  // link to another site's terms) — it opens instantly, just ungraded here.
+  const row = link.known
+    ? row_(`<span class="stamp known"><span>✓</span></span>`, link.label, "Already summarized — opens instantly")
+    : row_(`<span class="stamp new"><span>?</span></span>`, link.label, "Not analyzed yet — click to analyze");
+  row.addEventListener("click", () => openInPage(tab, link.url, link.label, dossier));
   return row;
 }
 
@@ -70,12 +84,13 @@ function row_(stampHtml, label, sub) {
   return row;
 }
 
-async function openInPage(tab, url, label) {
+async function openInPage(tab, url, label, dossier) {
   const reply = await chrome.runtime.sendMessage({
     type: "popup-open-url",
     tabId: tab.id,
     url,
     label,
+    list: dossier?.length > 1 ? dossier : undefined,
   });
   if (reply?.ok) window.close();
   else cannotRun();

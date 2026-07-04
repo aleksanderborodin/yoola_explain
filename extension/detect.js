@@ -76,6 +76,20 @@ async function yoolaInRegistry(href) {
   return new Set(registry.urls).has(hex.slice(0, registry.hash_len));
 }
 
+// Stamp each found link with whether Yoola ALREADY has a summary for it —
+// same normalize-and-hash membership check as detection, applied to the link
+// target. (Registry keys are requested-URL hashes, so a link that only reaches
+// a known document through a redirect won't match here — the server's alias
+// map still resolves it instantly on click.)
+async function yoolaMarkKnown(links) {
+  await Promise.all(
+    links.map(async (link) => {
+      link.known = await yoolaInRegistry(link.url);
+    })
+  );
+  return links;
+}
+
 // Consent-moment detection: a page that ASKS you to accept terms (signup/checkout)
 // rather than being the terms. If it links to legal documents, Yoola can
 // summarize the LINKED docs in place — the user never has to navigate away
@@ -133,7 +147,7 @@ async function yoolaDetect() {
   if (await yoolaInRegistry(location.href)) return { kind: "registry", links: [] };
   if (yoolaConsentContext()) {
     const links = yoolaFindLegalLinks();
-    if (links.length) return { kind: "links", links };
+    if (links.length) return { kind: "links", links: await yoolaMarkKnown(links) };
   }
   return null;
 }

@@ -29,12 +29,18 @@
     if (msg.type === "summarize-current") summarize();
     if (msg.type === "summarize-url") {
       // Local when the target IS this page (e.g. picked from the popup list
-      // while standing on it) — keeps in-page quote highlighting.
+      // while standing on it) — keeps in-page quote highlighting. When the
+      // popup passed its dossier along, the panel gets a "← back" to it.
       const remote = yoolaNormalizeUrl(msg.url) !== yoolaNormalizeUrl(location.href);
-      summarize({ url: msg.url, label: msg.label, remote });
+      const from =
+        msg.list?.length > 1
+          ? () => showPicker(msg.list, { title: "On this site", intro: "Documents this site asks you to agree to." })
+          : null;
+      summarize({ url: msg.url, label: msg.label, remote }, from);
     }
     if (msg.type === "get-legal-links") {
-      sendResponse({ links: yoolaFindLegalLinks() });
+      yoolaMarkKnown(yoolaFindLegalLinks()).then((links) => sendResponse({ links }));
+      return true; // async reply
     }
   });
 
@@ -71,63 +77,92 @@
     root.appendChild(tab);
   }
 
-  function openPanel() {
+  // onBack: when set, the header shows "←" returning to the list the user
+  // picked the document from (the picker or the popup's site dossier).
+  function openPanel(onBack) {
     const root = ui();
     root.querySelector(".panel")?.remove();
     const panel = document.createElement("div");
     panel.className = "panel";
     panel.innerHTML = `
       <header class="hd">
-        <span class="mark">Yoola</span>
+        <span class="hd-left">
+          ${onBack ? `<button class="back" title="Back to the list" aria-label="Back to the list">←</button>` : ""}
+          <span class="mark">Yoola</span>
+        </span>
         <button class="x" title="Close" aria-label="Close">✕</button>
       </header>
       <div class="bd"></div>`;
+    panel.querySelector(".back")?.addEventListener("click", onBack);
     panel.querySelector(".x").addEventListener("click", () => panel.remove());
     root.appendChild(panel);
     return panel.querySelector(".bd");
   }
 
-  // The consent-page chooser: this page links to several legal documents;
-  // summarize any of them without leaving the page.
-  function showPicker(links) {
+  // The document chooser: legal documents linked from this page (consent
+  // moment) or the popup's dossier for this site. Rows carry a grade stamp
+  // when Yoola has already graded them, and a "known" note when the registry
+  // says a summary exists (opens instantly from cache either way).
+  function showPicker(links, opts = {}) {
     const body = openPanel();
     body.innerHTML = `
-      <h2>Before you agree</h2>
-      <p class="pick-intro">This page asks you to accept legal documents. Pick one to review — you won't leave this page.</p>
+      <h2>${escapeHtml(opts.title ?? "Before you agree")}</h2>
+      <p class="pick-intro">${escapeHtml(opts.intro ?? "This page asks you to accept legal documents. Pick one to review — you won't leave this page.")}</p>
       <div class="picks"></div>`;
     const box = body.querySelector(".picks");
     for (const link of links) {
       const button = document.createElement("button");
       button.className = "pick";
       const host = new URL(link.url).hostname;
-      button.innerHTML = `<span class="pick-label">${escapeHtml(link.label)}</span><span class="pick-host">${escapeHtml(host)}</span>`;
-      button.addEventListener("click", () => summarize({ url: link.url, label: link.label, remote: true }));
+      const note = link.grade
+        ? `${VERDICT[link.grade] ?? "Graded"} · ${host}`
+        : link.known
+          ? `Already summarized — opens instantly · ${host}`
+          : host;
+      button.innerHTML = `
+        ${link.grade ? `<span class="pick-stamp g-${escapeHtml(link.grade)}"><span>${escapeHtml(link.grade)}</span></span>` : ""}
+        <span class="pick-txt">
+          <span class="pick-label">${escapeHtml(link.label)}</span>
+          <span class="pick-host">${escapeHtml(note)}</span>
+        </span>`;
+      button.addEventListener("click", () => {
+        const remote = yoolaNormalizeUrl(link.url) !== yoolaNormalizeUrl(location.href);
+        summarize({ url: link.url, label: link.label, remote }, () => showPicker(links, opts));
+      });
       box.appendChild(button);
     }
   }
 
   // target: {url, label?, remote?} — defaults to the page you're on. `remote`
   // means we're summarizing a LINKED document (v4 A5/link-mode): quotes deep-link
-  // to the source instead of highlighting in this page.
-  async function summarize(target = { url: location.href, remote: false }) {
-    const body = openPanel();
+  // to the source instead of highlighting in this page. `from` re-renders the
+  // list this document was picked from (wired to the header's ← button).
+  async function summarize(target = { url: location.href, remote: false }, from = null) {
+    const body = openPanel(from);
     body.innerHTML = `<div class="loading"><span class="spin"></span>
       <span>Reading the fine print…<br><small>First analysis of a new document takes about a minute; cached ones are instant.</small></span></div>`;
 
     const language = (navigator.language || "en").split("-")[0];
     let reply = await chrome.runtime.sendMessage({ type: "summarize", url: target.url, language });
     if (reply?.needClientContent) {
+      // The server couldn't fetch the document (bot wall / JS-only page).
+      // Read it from THIS browser instead: the current page's text when the
+      // target is this page, otherwise a background tab opened just to read it.
+      let clientContent;
       if (target.remote) {
-        body.innerHTML = `<div class="notice err">That site blocks our reader. Open the document and use Yoola there.</div>`;
-        return;
+        body.innerHTML = `<div class="loading"><span class="spin"></span>
+          <span>That site blocks our reader — opening the document in a background tab to read it here…</span></div>`;
+        const grab = await chrome.runtime.sendMessage({ type: "extract-remote", url: target.url });
+        clientContent = grab?.ok ? grab.content : null;
+        if (!clientContent) {
+          body.innerHTML = `<div class="notice err">That document can't be read automatically — the site blocks robots and the page couldn't be read in a tab either (this happens with PDFs and some app-only pages). Open it yourself and run Yoola there.</div>`;
+          return;
+        }
+      } else {
+        body.innerHTML = `<div class="loading"><span class="spin"></span>Site blocks our reader — sending the page text…</div>`;
+        clientContent = yoolaExtractText();
       }
-      body.innerHTML = `<div class="loading"><span class="spin"></span>Site blocks our reader — sending the page text…</div>`;
-      reply = await chrome.runtime.sendMessage({
-        type: "summarize",
-        url: target.url,
-        language,
-        clientContent: yoolaExtractText(),
-      });
+      reply = await chrome.runtime.sendMessage({ type: "summarize", url: target.url, language, clientContent });
     }
     if (!reply?.ok) {
       body.innerHTML = `<div class="notice err">${escapeHtml(reply?.detail || "Something went wrong.")}</div>`;
@@ -309,6 +344,10 @@
       font-weight: 700; font-size: 18px; letter-spacing: .3px; color: var(--ink);
     }
     .hd .mark::after { content: "."; color: var(--brass-soft); }
+    .hd-left { display: flex; align-items: center; gap: 10px; }
+    .back { background: none; border: none; color: var(--ink2); font-size: 17px; line-height: 1;
+      cursor: pointer; padding: 2px 4px; }
+    .back:hover { color: var(--ink); }
     .x { background: none; border: none; color: var(--ink3); font-size: 17px; cursor: pointer; padding: 4px; }
     .x:hover { color: var(--ink); }
     .bd { padding: 16px; overflow-y: auto; scrollbar-width: thin; scrollbar-color: var(--line) transparent; }
@@ -322,13 +361,20 @@
     .doc-line { color: var(--ink2); font-size: 12px; padding: 2px 2px 10px;
       border-bottom: 1px solid var(--line); margin-bottom: 12px; }
     .pick-intro { color: var(--ink2); font-size: 13px; margin: 6px 0 12px; }
-    .pick { display: flex; flex-direction: column; align-items: flex-start; gap: 2px;
+    .pick { display: flex; align-items: center; gap: 11px;
       width: 100%; text-align: left; background: var(--card); border: 1px solid var(--line);
       border-left: 3px solid var(--brass-soft); border-radius: 10px; padding: 11px 13px;
       margin: 8px 0; cursor: pointer; color: var(--ink); font: inherit; }
     .pick:hover { box-shadow: 0 4px 12px rgba(60,50,20,.12); }
+    .pick-txt { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
     .pick-label { font-weight: 600; font-size: 13.5px; word-break: break-word; }
     .pick-host { color: var(--ink3); font-size: 11.5px; }
+    .pick-stamp { flex: none; width: 32px; height: 32px; border-radius: 50%;
+      border: 2px solid currentColor; display: grid; place-items: center;
+      transform: rotate(-6deg); position: relative;
+      font-family: "Iowan Old Style", Palatino, Georgia, serif; font-weight: 700; font-size: 15px; }
+    .pick-stamp::before { content: ""; position: absolute; inset: 3px;
+      border: 1px solid currentColor; border-radius: 50%; opacity: .5; }
     .notice { border-radius: 10px; padding: 11px 13px; font-size: 13px; margin-bottom: 4px; }
     .notice.err { background: #F7E4E0; color: #8E2A1E; border: 1px solid #E5BFB7; }
     .notice.flag { background: #F5EAD2; color: #7A5A10; border: 1px solid #E4D2A6; margin-bottom: 14px; }

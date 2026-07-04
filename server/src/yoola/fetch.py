@@ -15,7 +15,19 @@ from .urltools import UrlError, assert_public_host, normalize_url
 
 MAX_REDIRECTS = 5
 ACCEPTED_TYPES = ("text/html", "application/xhtml", "text/plain", "application/pdf")
-USER_AGENT = "Mozilla/5.0 (compatible; YoolaBot/1.0; +https://yoola-explain.aleksanderbor.ru)"
+# Browser-like headers: CDN bot walls (Cloudflare et al.) 403 self-identified
+# bots outright, which made many mainstream ToS pages unreadable. We only ever
+# fetch public legal pages, so presenting as a normal browser is fair; pages
+# that still block us fall back to in-browser extraction (quarantined path).
+USER_AGENT = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
+)
+FETCH_HEADERS = {
+    "User-Agent": USER_AGENT,
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "en-US,en;q=0.9,ru;q=0.8",
+}
 
 
 class FetchError(Exception):
@@ -34,7 +46,7 @@ async def fetch_page(url: str, settings: Settings) -> FetchResult:
     async with httpx.AsyncClient(
         follow_redirects=False,
         timeout=settings.fetch_timeout_s,
-        headers={"User-Agent": USER_AGENT, "Accept": "text/html,application/xhtml+xml"},
+        headers=FETCH_HEADERS,
     ) as client:
         for _ in range(MAX_REDIRECTS + 1):
             try:
