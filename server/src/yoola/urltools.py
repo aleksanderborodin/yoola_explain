@@ -23,11 +23,12 @@ def normalize_url(url: str) -> str:
     port = parts.port
     default_port = {"http": 80, "https": 443}[parts.scheme]
     netloc = host if port in (None, default_port) else f"{host}:{port}"
-    query = [
+    # Sorted so the same logical URL with reordered params keys the same cache entry.
+    query = sorted(
         (k, v)
         for k, v in parse_qsl(parts.query, keep_blank_values=True)
         if k not in TRACKING_PARAMS and not k.startswith(TRACKING_PREFIXES)
-    ]
+    )
     # Trailing slashes are preserved: many sites 301 between the variants, and
     # stripping them here caused redirect ping-pong. Slash variants of the same
     # page converge via the content hash instead.

@@ -24,8 +24,11 @@ legal pages itself, generates a summary **once** per document via an
 OpenAI-compatible LLM gateway, and serves everyone else from cache.
 
 The spec is `Yoola_Design_v4.md` (Part I = why each decision beat its
-alternatives; the `C1…C12` labels used in code comments refer to its challenge
-record). `Yoola_Design_v3.md` is kept for history only — do not build from it.
+alternatives; the `C1…C12` labels in code comments refer to its challenge record;
+**Part IV = the v4.1 amendments** — `A1…A6` labels — which supersede earlier
+sections: store fetched text, reports dispute-not-demote, trusted-proxy IP +
+locked CORS, LLM legal-check, detection registry, batched/threaded efficiency).
+`Yoola_Design_v3.md` is kept for history only — do not build from it.
 
 Two invariants trump everything:
 1. **The cache is the product; the LLM is the fallback.** Only a cache miss may
@@ -68,7 +71,11 @@ Read this file first, then follow the path for your task. Skim
 **`server/src/yoola/` — the backend** (one module per responsibility):
 
 - `app.py` — FastAPI factory (`create_app(settings, provider, fetch_fn)` —
-  everything injectable for tests), the 3 public routes + `/healthz` + `/metrics`.
+  everything injectable for tests), the 4 routes (`GET`/`POST /v1/summary`,
+  `POST /v1/report`, `GET /v1/registry`) + `/healthz` + `/metrics`. CORS from
+  settings; client IP via `clientip`.
+- `clientip.py` — real client IP behind a trusted proxy (`X-Forwarded-For`) +
+  salted reporter-hash for dedup. See gotcha #10.
 - `pipeline.py` — **the heart**: `read_cached` (GET, pure read) and
   `request_summary` (POST: cache → fetch → gates → generate → cache). Order of
   stages is a contract; see `docs/architecture.md`.
@@ -84,9 +91,13 @@ Read this file first, then follow the path for your task. Skim
 - `schema.py` — all Pydantic contracts + `compute_grade` (A–E).
 - `provider.py` — `LLMProvider` ABC + `OpenAICompatProvider` (retries,
   think-block stripping, response_format fallback). The ONLY door to inference.
+  Ops: `classify_legal` (cheap gate), `generate_checklist`, `recheck_categories`
+  (targeted, context-only), `verify_claims` (batched — one call), `translate`.
 - `anchor.py` — server-side fuzzy quote location (rapidfuzz); quotes in, offsets out.
 - `store.py` — SQLite system of record (urls / doc_versions / aliases /
-  summaries / translations / flags / budgets). **Never stores full source text.**
+  summaries / translations / flags / budgets). Stores the extracted source text
+  on `doc_versions.content` (v4 A1) so regeneration/diffing needs no re-fetch;
+  `known_url_keys` powers the registry.
 - `metrics.py` — in-proc counters → `/metrics` (hit rate is THE KPI).
 
 **`server/tests/`** — `conftest.py` (FakeProvider + fetch fakes + client
@@ -114,14 +125,17 @@ user click
            └─ fetch fails → client_content fallback (quarantined, 2× budget)
          doc_version cache → serve      near-dup + re-anchor check → serve
          plausibility gate (422) → budgets (429 / 202+Retry-After)
-         ONE generation → schema validate → anchor quotes (drop unlocatable)
-         → regex omission cross-check (retry once, then degrade to "possible")
-         → verifier pass → grade → store → serve
+         → LLM legal-check (422) → ONE generation → schema validate
+         → omission cross-check (targeted recheck of flagged categories)
+         → anchor quotes (drop unlocatable) → BATCHED verifier
+         → grade → store (incl. content) → map url→doc (promotion) → serve
 ```
 
 - Summaries are immutable per `doc_version`; a changed page is a new version.
 - `confidence: "verified"` requires an anchored quote AND verifier agreement;
   anything less is `"possible"` — never silently asserted.
+- Reports mark a summary `disputed` (served with a warning), never remove it or
+  force paid regeneration (v4 A2).
 - Translations: `explanation`/`tldr` strings only, cached per language; quotes
   stay verbatim source language, always.
 
@@ -138,7 +152,8 @@ Keep the code small, explicit, and direct.
   `schema.py`, knobs in `config.py`, categories in `shared/taxonomy.json`.
 - Every trust/economic behavior gets a test in `test_api.py` when added.
 - Never log URL + content + a stable client id together (privacy claim, v4 §7).
-- Never store full source text in the DB (copyright posture, v4 C10).
+- Only public legal pages are ever fetched/stored; never authenticated/private
+  content (this is what makes storing `doc_versions.content` acceptable, v4 A1).
 
 ## Where To Put Changes
 

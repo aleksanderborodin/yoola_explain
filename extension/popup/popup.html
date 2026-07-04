@@ -3,20 +3,35 @@
   <head>
     <meta charset="utf-8" />
     <style>
-      body { font-family: -apple-system, "Segoe UI", Roboto, sans-serif; width: 260px;
-        margin: 0; padding: 14px; background: #14161b; color: #e8eaee; font-size: 13px; }
-      h1 { font-size: 15px; margin: 0 0 8px; }
-      button { width: 100%; padding: 8px 10px; border-radius: 8px; border: 1px solid #3a3f4a;
-        background: #262a33; color: #f5f6f8; cursor: pointer; font-size: 13px; }
-      button:hover { background: #30343d; }
-      p { color: #9aa1ad; margin: 8px 0 0; font-size: 12px; line-height: 1.4; }
+      :root {
+        --ink: #171A21; --raised: #1E222B; --line: #2B3140;
+        --fg: #ECEEF2; --fg2: #9AA3B2; --brass: #C9A24B; --brass-hi: #DDB65E;
+      }
+      * { box-sizing: border-box; }
+      body {
+        font-family: -apple-system, "Segoe UI", Roboto, sans-serif;
+        width: 268px; margin: 0; padding: 16px; background: var(--ink); color: var(--fg);
+        -webkit-font-smoothing: antialiased;
+      }
+      .mark {
+        font-family: "Iowan Old Style", Palatino, Georgia, serif;
+        font-weight: 700; font-size: 19px; letter-spacing: .4px; color: var(--brass);
+      }
+      .tagline { color: var(--fg2); font-size: 12px; margin: 4px 0 14px; line-height: 1.45; }
+      button {
+        width: 100%; padding: 10px; border-radius: 10px; border: 1px solid var(--brass);
+        background: linear-gradient(180deg, rgba(201,162,75,.14), rgba(201,162,75,.05));
+        color: var(--brass-hi); cursor: pointer; font-size: 13.5px; font-weight: 600;
+      }
+      button:hover { background: rgba(201,162,75,.2); }
+      .fine { color: var(--fg2); margin: 12px 0 0; font-size: 11px; line-height: 1.5; }
     </style>
   </head>
   <body>
-    <h1>Yoola</h1>
+    <div class="mark">Yoola</div>
+    <p class="tagline">A second opinion on the fine print — the alarming clauses first, each traceable to the source.</p>
     <button id="summarize">Summarize this page</button>
-    <p>Yoola detects legal pages automatically and summarizes only when you ask.
-       AI summary — not legal advice.</p>
+    <p class="fine">Detects legal pages automatically; only summarizes when you ask. AI summary — not legal advice.</p>
     <script src="popup.js"></script>
   </body>
 </html>

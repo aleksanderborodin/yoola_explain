@@ -1,26 +1,46 @@
 # Extension (Chrome MV3, vanilla JS — no build step)
 
 Principle: **auto-detect, never auto-summarize.** Nothing leaves the page until
-the user clicks (pill, or popup button). `background.js` is the only file that
-touches the network.
+the user acts (detection tab, popup, or right-click). `background.js` is the only
+file that touches the network.
+
+## Triggers (three ways in)
+
+1. **Detection tab** — appears bottom-right when the page is detected (see below).
+2. **Popup button** — "Summarize this page", for anything.
+3. **Right-click → "Summarize this page with Yoola"** — the context menu, for
+   pages detection misses. All three call the same flow.
+
+## Detection (three signals, cheapest first, none phones home per page)
+
+`detect.js#yoolaDetect()` returns `"heuristic"`, `"registry"`, or `null`:
+1. cheap local gate (URL path / title regex);
+2. marker-density scan (only if #1 passes);
+3. **registry membership** — the extension normalizes the current URL, hashes
+   it, and checks it against a locally-cached digest of known verified URLs
+   (`GET /v1/registry`, synced every few hours by the worker). This is how a
+   page one user added via right-click lights up ("Summary available") for
+   everyone else even when the heuristic would miss it — with no per-visit
+   network call, so the "no browsing history" line holds.
 
 ## Files
 
-- `manifest.json` — MV3. Content scripts on `<all_urls>` (detection must see
-  every page); host permissions only for the API origins.
-- `detect.js` — detection + fallback extraction, loaded before `content.js`.
-  Cheap gates first (URL path / title regex), the marker-density scan runs only
-  when they pass — never heavy work on random pages. `yoolaExtractText()` is
-  the crude `<main>/<article>/body` innerText extractor used ONLY for the
-  server-fetch-failed fallback path.
-- `content.js` — the pill ("Terms detected — summarize?"), the shadow-DOM side
-  panel (grade, alerts-first cards, TL;DR, collapsible full checklist,
-  disclaimer), per-category "report wrong", and quote highlighting.
-- `background.js` — service worker. Flow per request: L1 → `GET /v1/summary` →
+- `manifest.json` — MV3. Content scripts on `<all_urls>`; permissions:
+  `storage`, `activeTab`, `contextMenus`, `alarms`. Host permissions only for
+  the API origins.
+- `detect.js` — detection, URL normalization (mirrors the server), registry
+  lookup, and the crude `<main>/<article>/body` fallback extractor
+  (`yoolaExtractText`, used ONLY for the server-fetch-failed path).
+- `content.js` — the detection tab + the shadow-DOM "dossier" panel: the
+  **verdict stamp** (A–E seal, the signature element), alerts-first cards,
+  in-brief bullets, collapsible full checklist, disputed/unverified warnings,
+  per-clause "report wrong", quote highlighting. Committed dark graphite+brass
+  look (a deliberate single theme — it's the tool's identity, not the page's).
+- `background.js` — service worker. Per request: L1 → `GET /v1/summary` →
   `POST /v1/summary` (→ on 502, asks content for `clientContent` and retries).
-  Owns the L1 LRU cache and the "ToS" badge. `API_BASE` constant at the top
-  (dev: `127.0.0.1:8000`).
-- `popup/` — manual "Summarize this page" for pages detection missed.
+  Owns the L1 LRU cache, the badge, the right-click menu, and `syncRegistry()`.
+  `API_BASE` constant at the top (dev: `127.0.0.1:8000`).
+- `popup/` — manual "Summarize this page", dossier-styled.
 
 ## Message contract (content ⇄ background)
 
@@ -29,7 +49,7 @@ touches the network.
 | `detected` | content → bg | — | sets tab badge |
 | `summarize` | content → bg | `{url, language, clientContent?}` | `{ok, payload, fromL1?}` \| `{ok:false, needClientContent:true}` \| `{ok:false, detail}` |
 | `report` | content → bg | `{docVersion, category}` | `{ok}` |
-| `summarize-current` | popup/bg → content | — | triggers the panel |
+| `summarize-current` | popup/bg/context-menu → content | — | triggers the panel |
 
 ## L1 cache
 

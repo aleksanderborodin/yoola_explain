@@ -1,9 +1,15 @@
-// Client-side detection — the UX gate only, never a security boundary
-// (Design v4: the server plausibility gate is the enforcement point).
-// Cheap gates run first; the density scan runs only when they pass.
+// Detection — the UX gate only, never a security boundary (the server
+// plausibility + LLM legal-check are the real gates). Three signals, cheapest
+// first, and none of them phones home per page:
+//   1. cheap local heuristic (URL path / title)
+//   2. marker-density scan (only if #1 passes)
+//   3. registry membership: the server's set of known legal-page URLs, checked
+//      LOCALLY against a digest the background worker syncs — this is how a
+//      page one user added by right-click lights up for everyone else, even
+//      when the heuristic would miss it.
 
-const YOOLA_URL_HINTS = /\/(terms|tos|privacy|eula|legal|conditions|agreement|policy|policies)([/._-]|$)/i;
-const YOOLA_TITLE_HINTS = /(terms|privacy|eula|legal|agreement|conditions|policy)/i;
+const YOOLA_URL_HINTS = /\/(terms|tos|privacy|eula|legal|conditions|agreement|policy|policies|gdpr|ccpa|cookies?)([/._-]|$)/i;
+const YOOLA_TITLE_HINTS = /(terms|privacy|eula|legal|agreement|conditions|policy|licen[sc]e)/i;
 
 const YOOLA_MARKERS = [
   "terms of service", "terms of use", "terms and conditions", "privacy policy",
@@ -11,6 +17,8 @@ const YOOLA_MARKERS = [
   "intellectual property", "liability", "warranty", "indemnif", "arbitrat",
   "governing law", "termination", "you agree", "we reserve the right",
 ];
+
+const YOOLA_TRACKING = /^(utm_|gclid$|fbclid$|msclkid$|ref$|mc_cid$|mc_eid$|igshid$)/i;
 
 function yoolaCheapGate() {
   return (
@@ -20,7 +28,6 @@ function yoolaCheapGate() {
   );
 }
 
-// Marker density per 1000 words, mirroring the server gate's shape.
 function yoolaDensityScan() {
   const text = (document.body?.innerText ?? "").toLowerCase();
   const words = text.split(/\s+/).length;
@@ -33,12 +40,44 @@ function yoolaDensityScan() {
   return (hits * 1000) / words >= 2.0;
 }
 
-function yoolaDetectLegalPage() {
-  return yoolaCheapGate() && yoolaDensityScan();
+// Mirror the server's normalize_url closely enough for registry lookups. A
+// mismatch only costs a missed pill (degrades to heuristic), never correctness.
+function yoolaNormalizeUrl(href) {
+  let u;
+  try {
+    u = new URL(href);
+  } catch {
+    return null;
+  }
+  if (u.protocol !== "http:" && u.protocol !== "https:") return null;
+  const params = [...u.searchParams.entries()].filter(([k]) => !YOOLA_TRACKING.test(k));
+  params.sort((a, b) => (a[0] + a[1]).localeCompare(b[0] + b[1]));
+  const query = params.map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`).join("&");
+  const host = u.hostname.toLowerCase().replace(/\.$/, "");
+  const port = u.port && u.port !== (u.protocol === "https:" ? "443" : "80") ? `:${u.port}` : "";
+  const path = u.pathname || "/";
+  return `${u.protocol}//${host}${port}${path}${query ? "?" + query : ""}`;
 }
 
-// Crude main-content extraction — used ONLY as the fallback when the server
-// cannot fetch the page itself (v4 C1: the quarantined client-content path).
+async function yoolaInRegistry(href) {
+  const { registry } = await chrome.storage.local.get("registry");
+  if (!registry?.urls?.length) return false;
+  const urlKey = yoolaNormalizeUrl(href);
+  if (!urlKey) return false;
+  const bytes = new TextEncoder().encode(urlKey);
+  const digest = await crypto.subtle.digest("SHA-256", bytes);
+  const hex = [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("");
+  return new Set(registry.urls).has(hex.slice(0, registry.hash_len));
+}
+
+// Returns "heuristic" | "registry" | null — null means keep the icon dim.
+async function yoolaDetect() {
+  if (yoolaCheapGate() && yoolaDensityScan()) return "heuristic";
+  if (await yoolaInRegistry(location.href)) return "registry";
+  return null;
+}
+
+// Fallback extractor — used ONLY when the server can't fetch (quarantined path).
 function yoolaExtractText() {
   const root =
     document.querySelector("main") ??

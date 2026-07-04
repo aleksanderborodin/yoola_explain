@@ -25,6 +25,7 @@ CREATE TABLE IF NOT EXISTS doc_versions (
   source_language TEXT NOT NULL,
   source_verified INTEGER NOT NULL,
   keyword_map     TEXT NOT NULL,
+  content         TEXT,           -- extracted source text (public legal pages only)
   first_seen      TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS aliases (
@@ -36,7 +37,7 @@ CREATE TABLE IF NOT EXISTS summaries (
   summary_json  TEXT NOT NULL,
   model_version TEXT NOT NULL,
   generated_at  TEXT NOT NULL,
-  demoted       INTEGER NOT NULL DEFAULT 0
+  disputed      INTEGER NOT NULL DEFAULT 0
 );
 CREATE TABLE IF NOT EXISTS translations (
   doc_version  TEXT NOT NULL REFERENCES doc_versions(doc_version),
@@ -45,11 +46,12 @@ CREATE TABLE IF NOT EXISTS translations (
   PRIMARY KEY (doc_version, language)
 );
 CREATE TABLE IF NOT EXISTS flags (
-  id          INTEGER PRIMARY KEY AUTOINCREMENT,
   doc_version TEXT NOT NULL,
+  reporter    TEXT NOT NULL,
   category    TEXT,
   reason      TEXT,
-  created_at  TEXT NOT NULL
+  created_at  TEXT NOT NULL,
+  PRIMARY KEY (doc_version, reporter)
 );
 CREATE TABLE IF NOT EXISTS budgets (
   day    TEXT NOT NULL,
@@ -108,6 +110,18 @@ class Store:
                 "UPDATE urls SET last_checked = ? WHERE url_key = ?", (_now(), url_key)
             )
 
+    def known_url_keys(self) -> list[str]:
+        """Every URL with a live, server-verified summary — the detection registry
+        the extension checks locally so manually-added pages surface for everyone."""
+        with self._lock:
+            rows = self._conn.execute(
+                """SELECT u.url_key FROM urls u
+                   JOIN doc_versions d ON d.doc_version = u.doc_version
+                   JOIN summaries s ON s.doc_version = u.doc_version
+                   WHERE d.source_verified = 1 AND s.disputed = 0"""
+            ).fetchall()
+        return [r["url_key"] for r in rows]
+
     # -- doc versions & summaries ----------------------------------------
 
     def resolve_doc_version(self, doc_version: str) -> str:
@@ -132,13 +146,17 @@ class Store:
         source_language: str,
         source_verified: bool,
         keyword_map: dict[str, list[str]],
+        content: str,
     ) -> None:
+        # `content` is the extracted source text, kept so regeneration on model
+        # upgrade and version-diffing never need to re-fetch. Only public legal
+        # pages are ever fetched, so this holds no private/authenticated data.
         with self._lock, self._conn:
             self._conn.execute(
                 """INSERT OR IGNORE INTO doc_versions
                    (doc_version, simhash, content_chars, source_language,
-                    source_verified, keyword_map, first_seen)
-                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                    source_verified, keyword_map, content, first_seen)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     doc_version,
                     format(simhash, "016x"),
@@ -146,9 +164,17 @@ class Store:
                     source_language,
                     int(source_verified),
                     json.dumps(keyword_map),
+                    content,
                     _now(),
                 ),
             )
+
+    def get_content(self, doc_version: str) -> str | None:
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT content FROM doc_versions WHERE doc_version = ?", (doc_version,)
+            ).fetchone()
+        return row["content"] if row else None
 
     def mark_source_verified(self, doc_version: str) -> None:
         with self._lock, self._conn:
@@ -165,10 +191,11 @@ class Store:
             )
 
     def save_summary(self, doc: SummaryDoc) -> None:
+        # A fresh generation clears any prior dispute (INSERT OR REPLACE resets it).
         with self._lock, self._conn:
             self._conn.execute(
                 """INSERT OR REPLACE INTO summaries
-                   (doc_version, summary_json, model_version, generated_at, demoted)
+                   (doc_version, summary_json, model_version, generated_at, disputed)
                    VALUES (?, ?, ?, ?, 0)""",
                 (
                     doc.doc_version,
@@ -178,15 +205,22 @@ class Store:
                 ),
             )
 
-    def get_summary(self, doc_version: str, include_demoted: bool = False) -> SummaryDoc | None:
+    def get_summary(self, doc_version: str) -> SummaryDoc | None:
         with self._lock:
             row = self._conn.execute(
-                "SELECT summary_json, demoted FROM summaries WHERE doc_version = ?",
+                "SELECT summary_json FROM summaries WHERE doc_version = ?",
                 (doc_version,),
             ).fetchone()
-        if row is None or (row["demoted"] and not include_demoted):
+        if row is None:
             return None
         return SummaryDoc.model_validate_json(row["summary_json"])
+
+    def is_disputed(self, doc_version: str) -> bool:
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT disputed FROM summaries WHERE doc_version = ?", (doc_version,)
+            ).fetchone()
+        return bool(row and row["disputed"])
 
     def find_near_duplicate(
         self, simhash: int, max_distance: int, verified_only: bool = True
@@ -198,7 +232,7 @@ class Store:
         """
         query = """SELECT d.doc_version, d.simhash, d.keyword_map
                    FROM doc_versions d JOIN summaries s ON s.doc_version = d.doc_version
-                   WHERE s.demoted = 0"""
+                   WHERE s.disputed = 0"""
         if verified_only:
             query += " AND d.source_verified = 1"
         with self._lock:
@@ -232,22 +266,26 @@ class Store:
 
     # -- flags / demotion --------------------------------------------------
 
-    def add_flag(self, doc_version: str, category: str | None, reason: str | None) -> int:
-        """Record a report; returns the total flag count for the doc_version."""
+    def add_flag(
+        self, doc_version: str, reporter: str, category: str | None, reason: str | None
+    ) -> int:
+        """Record one report per (doc_version, reporter); returns the DISTINCT
+        reporter count so one IP cannot cast multiple dispute votes."""
         with self._lock, self._conn:
             self._conn.execute(
-                "INSERT INTO flags (doc_version, category, reason, created_at) VALUES (?, ?, ?, ?)",
-                (doc_version, category, reason, _now()),
+                """INSERT OR IGNORE INTO flags (doc_version, reporter, category, reason, created_at)
+                   VALUES (?, ?, ?, ?, ?)""",
+                (doc_version, reporter, category, reason, _now()),
             )
             row = self._conn.execute(
                 "SELECT COUNT(*) AS n FROM flags WHERE doc_version = ?", (doc_version,)
             ).fetchone()
         return row["n"]
 
-    def demote_summary(self, doc_version: str) -> None:
+    def set_disputed(self, doc_version: str) -> None:
         with self._lock, self._conn:
             self._conn.execute(
-                "UPDATE summaries SET demoted = 1 WHERE doc_version = ?", (doc_version,)
+                "UPDATE summaries SET disputed = 1 WHERE doc_version = ?", (doc_version,)
             )
 
     # -- budgets -------------------------------------------------------------

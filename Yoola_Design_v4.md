@@ -305,6 +305,64 @@ Existing `server/` and `extension/` are replaced wholesale (Appendix A). `tests/
 
 ---
 
+# Part IV — v4.1 amendments (post-build hardening & review)
+
+After the first build, an abuse/load/efficiency review and two product questions
+changed the following. These supersede the sections they touch.
+
+## A1. Store the extracted source text (reverses C10)
+We fetch the full text once to generate; discarding it forced a re-fetch for
+regeneration/diffing and bought little. **`doc_versions.content` now holds the
+extracted text.** Only *public* legal pages are ever fetched, so this holds no
+private/authenticated data. The old "we store no copies" posture is dropped in
+favor of "we store public legal text we already retrieved, to avoid re-fetching."
+Quotes remain short verbatim excerpts either way. Payoff: model-upgrade
+regeneration and version-diffing need no network.
+
+## A2. Reports *dispute*, they do not *demote* (fixes a cost-amplification hole)
+The v3/v4 "auto-demote → regenerate" loop was an unauthenticated cost/DoS vector
+(doc_versions are public; 3 reports forced paid regeneration, repeatable). Now:
+a report is **one vote per (doc, reporter-hash)**, per-IP rate-limited; at the
+distinct-IP `dispute_threshold` the summary is marked **disputed** — still served,
+with a warning flag in the payload and UI — and queued for review. **Reports never
+remove a summary or trigger paid work.** Regeneration happens only on genuine
+content change (new `doc_version`) or manual review. (Removes the 409 path.)
+
+## A3. Real client IP behind a proxy; locked CORS
+Behind the deploy proxy, `request.client.host` is the proxy, breaking per-IP
+budgets. `trusted_proxy_hops` selects the real client from `X-Forwarded-For`
+(proxies must append; spoofed leading entries are ignored). CORS defaults to an
+empty allowlist — the extension uses host permissions and is unaffected, while
+third-party websites can no longer drive the money-spending API from a visitor's
+browser. A `global_daily_fetch_budget` caps use of the server as a fetch amplifier.
+
+## A4. LLM legal-check gate + clean promotion (the right-click story)
+Before the expensive generation, a **cheap LLM classifier** confirms the page is
+actually a legal agreement (belt-and-braces with the regex plausibility gate).
+This is what makes the **right-click "Summarize this page"** trigger safe on pages
+the heuristic never detected: server fetch + plausibility + LLM-confirm → generate
+→ map `url_key → doc_version`. That mapping *is* the promotion — any other user
+who opens the same URL gets the cached summary.
+
+## A5. Detection registry (how promoted pages reach other users)
+For a page the local heuristic misses, other users learn it's covered via a
+**registry digest**: `GET /v1/registry` returns truncated SHA-256 hashes of known
+verified URLs; the extension syncs it periodically and checks the current URL
+**locally** (no per-visit network call — the "no browsing history" principle
+holds). Match → the detection tab lights up as "Summary available." Quarantined
+(unverified, client-content) entries are never in the registry.
+
+## A6. Efficiency: fewer, cheaper LLM calls per miss
+- **Batched verifier:** one call verifies all claims (was N serial calls — the
+  cause of ~65 s misses).
+- **Targeted re-check:** an omitted-category cross-check re-examines only the
+  keyword-hit *context windows*, not the whole document again.
+- **Threaded extraction:** trafilatura runs in a worker thread so a large page
+  can't stall the event loop (and every cache hit behind it).
+- Query params are sorted in the URL key so reordered params share a cache entry.
+
+---
+
 # Appendix A — Prototype post-mortem (why it's replaced, not fixed)
 
 Catalogued so the rewrite doesn't repeat them:

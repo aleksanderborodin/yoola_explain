@@ -33,11 +33,27 @@ class Settings(BaseSettings):
     content_max_chars: int = 300_000
     min_words: int = 120
     plausibility_min_density: float = 2.0  # legal markers per 1000 words
+    llm_legal_check: bool = True  # cheap LLM confirmation before an expensive generation
 
     anchor_min_score: float = 85.0
     simhash_max_distance: int = 4
 
     ip_daily_miss_budget: int = 10
     global_daily_miss_budget: int = 200
-    flag_demote_threshold: int = 3
+    global_daily_fetch_budget: int = 2000  # caps use of the server as a fetch amplifier
     url_ttl_days: int = 7
+
+    # Reports: distinct-IP threshold to mark a summary disputed (a warning, never
+    # a paid regeneration — see docs/architecture.md), and a per-IP daily cap.
+    dispute_threshold: int = 3
+    ip_daily_report_budget: int = 20
+
+    # Deployment: number of trusted reverse-proxy hops in front of uvicorn.
+    # 0 = direct (dev). Behind Caddy/nginx set 1 so the real client IP is read
+    # from X-Forwarded-For instead of the proxy's address. See docs/gotchas.md.
+    trusted_proxy_hops: int = 0
+    # CORS origins allowed for browser (website) callers. The extension uses
+    # host_permissions and is unaffected by this, so the safe default is empty
+    # (no third-party website may drive the API from a visitor's browser).
+    allowed_origins: list[str] = []
+    report_salt: str = "yoola-dev-salt"  # override in prod; salts reporter-IP hashes

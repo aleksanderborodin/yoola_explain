@@ -82,19 +82,29 @@ def test_real_checklist_is_schema_valid_and_grounded(provider, taxonomy, setting
 
 def test_real_verifier_accepts_supported_rejects_contradicted(provider):
     quote = ["Any dispute shall be resolved by binding arbitration."]
+    verdict = run(
+        provider.verify_claims(
+            [
+                ("ok", "Disputes must go to binding arbitration.", quote),
+                ("bad", "Users may sue the company in any court they like.", quote),
+            ]
+        )
+    )
+    assert verdict["ok"] is True
+    assert verdict["bad"] is False
 
+
+def test_real_classify_legal_accepts_tos_rejects_prose(provider):
     async def both():
-        supported = await provider.verify_claim(
-            "Disputes must go to binding arbitration.", quote
+        legal = await provider.classify_legal(SAMPLE_TOS)
+        prose = await provider.classify_legal(
+            "Our sourdough starter needs daily feeding. Mix flour and water, " * 30
         )
-        contradicted = await provider.verify_claim(
-            "Users may sue the company in any court they like.", quote
-        )
-        return supported, contradicted
+        return legal, prose
 
-    supported, contradicted = run(both())
-    assert supported is True
-    assert contradicted is False
+    legal, prose = run(both())
+    assert legal is True
+    assert prose is False
 
 
 def test_real_translation_preserves_count_and_order(provider):

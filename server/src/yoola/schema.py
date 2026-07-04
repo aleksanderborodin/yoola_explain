@@ -66,6 +66,7 @@ class SummaryResponse(SummaryDoc):
     language: str
     source: Literal["cache", "generated", "translated"]
     source_verified: bool
+    disputed: bool = False  # readers flagged this summary; shown with a warning, still served
     disclaimer: str
 
 

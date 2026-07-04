@@ -39,3 +39,20 @@ Fix one → delete it here. Discover one → add it, same session.
    and assumes length preservation. True for ~all real text, but a few Unicode
    codepoints expand under `lower()`; offsets would drift on such documents.
    Cosmetic risk only (offsets feed nothing security-relevant).
+10. **Per-IP budget is meaningless without `trusted_proxy_hops`.** Behind a proxy,
+    `request.client.host` is the proxy; set `trusted_proxy_hops=1` (for Caddy)
+    AND configure the proxy to APPEND to `X-Forwarded-For` (never trust a
+    client-supplied XFF with 0 hops). `clientip.client_ip` reads the Nth entry
+    from the right. Deploy checklist item.
+11. **CORS ≠ the extension.** The extension reaches the API via host_permissions,
+    not CORS, so `allowed_origins` can (and by default does) stay empty without
+    breaking it — that empty default is what blocks third-party websites from
+    driving the money-spending API from a visitor's browser. Don't "fix" a
+    website CORS error by opening this up.
+12. **Registry URL-normalization must match client and server.** `detect.js#yoolaNormalizeUrl`
+    mirrors `urltools.normalize_url` (sorted params, stripped tracking, trailing
+    slash kept). A drift only costs a missed detection pill (falls back to the
+    heuristic), never correctness — but keep them in sync when you change either.
+13. **Headless screenshots capture load animations mid-flight.** The panel/stamp
+    fade+scale in; a bare `--screenshot` catches them at opacity 0. Use
+    `--virtual-time-budget=3000` to let them settle before capturing.

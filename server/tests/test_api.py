@@ -93,12 +93,13 @@ def test_unsupported_claims_marked_possible(make_client):
         assert present and all(c["confidence"] == "possible" for c in present)
 
 
-def test_crosscheck_catches_omission_and_retries(make_client):
+def test_crosscheck_catches_omission_with_targeted_recheck(make_client):
     provider = FakeProvider()
     provider.omit = {"arbitration"}  # model "forgets" arbitration on the first pass
     with make_client(provider, fetch_returning(html_page(SAMPLE_TOS))) as client:
         body = post(client).json()
-        assert provider.generate_calls == 2  # retried with the cross-check notice
+        assert provider.generate_calls == 1  # NOT a second full generation
+        assert provider.recheck_calls == 1  # targeted, context-only recheck instead
         arbitration = next(c for c in body["categories"] if c["id"] == "arbitration")
         assert arbitration["status"] == "present"
 
@@ -250,24 +251,106 @@ def test_material_change_regenerates(make_client):
 # ------------------------------------------------------------ feedback loop
 
 
-def test_report_demotes_and_regeneration_recovers(make_client):
+def report(client, doc_version, ip):
+    # trusted_proxy_hops=1 in these tests, so X-Forwarded-For sets the reporter.
+    return client.post(
+        "/v1/report",
+        json={"doc_version": doc_version, "reason": "wrong"},
+        headers={"X-Forwarded-For": ip},
+    )
+
+
+def test_reports_mark_disputed_but_never_deny_or_regenerate(make_client):
     provider = FakeProvider()
     with make_client(
-        provider, fetch_returning(html_page(SAMPLE_TOS)), flag_demote_threshold=2
+        provider,
+        fetch_returning(html_page(SAMPLE_TOS)),
+        dispute_threshold=3,
+        trusted_proxy_hops=1,
     ) as client:
         doc_version = post(client).json()["doc_version"]
-        for _ in range(2):
-            assert (
-                client.post(
-                    "/v1/report", json={"doc_version": doc_version, "reason": "wrong"}
-                ).status_code
-                == 204
-            )
-        assert client.get("/v1/summary", params={"url": URL}).status_code == 409
-        # A new POST regenerates (budget-gated) and recovers the entry.
+        for ip in ("1.1.1.1", "2.2.2.2", "3.3.3.3"):
+            assert report(client, doc_version, ip).status_code == 204
+
+        # Still served — reporting adds a warning, never a 409 or a paid regen.
+        got = client.get("/v1/summary", params={"url": URL})
+        assert got.status_code == 200
+        assert got.json()["disputed"] is True
+        assert post(client).json()["disputed"] is True
+        assert provider.generate_calls == 1  # no report-driven regeneration
+
+
+def test_one_ip_cannot_cast_multiple_dispute_votes(make_client):
+    provider = FakeProvider()
+    with make_client(
+        provider,
+        fetch_returning(html_page(SAMPLE_TOS)),
+        dispute_threshold=3,
+        trusted_proxy_hops=1,
+    ) as client:
+        doc_version = post(client).json()["doc_version"]
+        for _ in range(5):
+            report(client, doc_version, "9.9.9.9")  # same reporter every time
+        assert client.get("/v1/summary", params={"url": URL}).json()["disputed"] is False
+
+
+def test_report_rate_limited_per_ip(make_client):
+    provider = FakeProvider()
+    with make_client(
+        provider,
+        fetch_returning(html_page(SAMPLE_TOS)),
+        ip_daily_report_budget=2,
+        trusted_proxy_hops=1,
+    ) as client:
+        doc_version = post(client).json()["doc_version"]
+        assert report(client, doc_version, "5.5.5.5").status_code == 204
+        assert report(client, doc_version, "5.5.5.5").status_code == 204
+        assert report(client, doc_version, "5.5.5.5").status_code == 429
+
+
+# ------------------------------------------------------------ registry (detection)
+
+
+def test_registry_lists_verified_urls_only(make_client):
+    import hashlib
+
+    provider = FakeProvider()
+    with make_client(provider, fetch_returning(html_page(SAMPLE_TOS))) as client:
+        assert client.get("/v1/registry").json()["urls"] == []  # empty at first
+        post(client)  # server-fetched + generated -> promoted
+        digest = client.get("/v1/registry").json()
+        expected = hashlib.sha256(URL.encode()).hexdigest()[: digest["hash_len"]]
+        assert expected in digest["urls"]
+
+
+def test_client_fallback_not_in_registry(make_client):
+    # Quarantined (unverified) entries must not surface for other users.
+    provider = FakeProvider()
+    with make_client(provider, fetch_failing) as client:
+        assert post(client, content=SAMPLE_TOS).json()["source_verified"] is False
+        assert client.get("/v1/registry").json()["urls"] == []
+
+
+# ------------------------------------------------------------ LLM legal-check gate
+
+
+def test_llm_legal_check_rejects_non_legal(make_client):
+    provider = FakeProvider()
+    provider.legal_result = False  # LLM says "not a legal agreement"
+    with make_client(provider, fetch_returning(html_page(SAMPLE_TOS))) as client:
+        assert post(client).status_code == 422
+        assert provider.classify_calls == 1
+        assert provider.generate_calls == 0  # gated before the expensive call
+
+
+def test_llm_legal_check_can_be_disabled(make_client):
+    provider = FakeProvider()
+    provider.legal_result = False
+    with make_client(
+        provider, fetch_returning(html_page(SAMPLE_TOS)), llm_legal_check=False
+    ) as client:
         assert post(client).status_code == 200
-        assert provider.generate_calls == 2
-        assert client.get("/v1/summary", params={"url": URL}).status_code == 200
+        assert provider.classify_calls == 0
 
 
 # ------------------------------------------------------------ translation (C9)

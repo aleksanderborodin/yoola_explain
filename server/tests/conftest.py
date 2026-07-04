@@ -68,20 +68,26 @@ class FakeProvider(LLMProvider):
     text, quoting the real surrounding text (so anchors genuinely locate)."""
 
     def __init__(self):
+        self.classify_calls = 0
         self.generate_calls = 0
-        self.verify_calls = 0
+        self.recheck_calls = 0
+        self.verify_calls = 0  # batched calls, not per-claim
         self.translate_calls = 0
         self.verify_result = True
-        self.omit: set[str] = set()  # categories to wrongly report not_addressed
-        self.fix_on_notice = True  # whether the cross-check retry "fixes" the omission
+        self.legal_result = True  # classify_legal verdict
+        self.omit: set[str] = set()  # categories wrongly reported not_addressed on pass 1
+        self.fix_on_notice = True  # whether the targeted recheck "fixes" the omission
 
-    async def generate_checklist(self, text, taxonomy, notice=None):
+    async def classify_legal(self, text):
+        self.classify_calls += 1
+        return self.legal_result
+
+    async def generate_checklist(self, text, taxonomy):
         self.generate_calls += 1
-        omit = set() if (notice and self.fix_on_notice) else self.omit
         hits = keyword_hits(text, taxonomy)
         categories = []
         for category in taxonomy:
-            if category.id in hits and category.id not in omit:
+            if category.id in hits and category.id not in self.omit:
                 categories.append(
                     LLMCategoryFinding(
                         id=category.id,
@@ -100,9 +106,29 @@ class FakeProvider(LLMProvider):
         )
         return checklist, "fake-model-1"
 
-    async def verify_claim(self, claim, quotes):
+    async def recheck_categories(self, context_by_category, categories):
+        self.recheck_calls += 1
+        findings = []
+        for category in categories:
+            context = context_by_category.get(category.id, "")
+            if self.fix_on_notice and context:
+                quote = context.split(" … ")[0][:200]
+                findings.append(
+                    LLMCategoryFinding(
+                        id=category.id,
+                        status="present",
+                        severity="high" if category.high_stakes else "medium",
+                        explanation=f"The document addresses: {category.title}.",
+                        quotes=[quote],
+                    )
+                )
+            else:
+                findings.append(LLMCategoryFinding(id=category.id, status="not_addressed"))
+        return findings
+
+    async def verify_claims(self, items):
         self.verify_calls += 1
-        return self.verify_result
+        return {key: self.verify_result for key, _, _ in items}
 
     async def translate(self, strings, target_language):
         self.translate_calls += 1

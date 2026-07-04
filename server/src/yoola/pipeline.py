@@ -5,6 +5,7 @@ Fallback path: client-submitted content, quarantined (url never mapped, entry
 marked source_verified=0, served only on byte-identical content).
 """
 
+import asyncio
 import logging
 from dataclasses import dataclass
 from typing import Awaitable, Callable
@@ -20,6 +21,7 @@ from .plausibility import check_plausibility
 from .provider import LLMProvider, ProviderError
 from .schema import (
     CategoryFinding,
+    LLMCategoryFinding,
     LLMChecklist,
     Quote,
     SummaryDoc,
@@ -69,11 +71,11 @@ def read_cached(deps: Deps, raw_url: str, language: str) -> Outcome:
     doc_ver = deps.store.resolve_doc_version(entry["doc_version"])
     doc = deps.store.get_summary(doc_ver)
     if doc is None:
-        if deps.store.get_summary(doc_ver, include_demoted=True) is not None:
-            return Outcome(409, detail="summary demoted, regeneration pending")
         metrics.inc("cache_miss_get")
         return Outcome(404, detail="no cached summary for this URL")
     metrics.inc("cache_hit_get")
+    # A disputed summary is still served (with a warning flag) — reports never
+    # deny service or force a paid regeneration (docs/architecture.md).
     payload = _respond(deps, doc, url_key, language, source="cache")
     return Outcome(200, payload=payload)
 
@@ -98,8 +100,13 @@ async def request_summary(
 
     # Miss (or stale): the server observes the content itself (v4 C1).
     try:
+        if deps.store.increment_budget("fetch:global") > deps.settings.global_daily_fetch_budget:
+            metrics.inc("rejected_fetch_budget")
+            return Outcome(503, detail="fetch capacity reached for today, try again later")
         fetched = await deps.fetch_fn(url_key, deps.settings)
-        text = extract_main_text(fetched.html, fetched.final_url)
+        # trafilatura is CPU-bound and synchronous — never run it on the event
+        # loop, or one large page stalls every other request (docs/gotchas.md).
+        text = await asyncio.to_thread(extract_main_text, fetched.html, fetched.final_url)
         source_verified = True
         final_url = fetched.final_url
         metrics.inc("fetch_ok")
@@ -147,6 +154,17 @@ async def request_summary(
     if budget is not None:
         return budget
 
+    # Cheap LLM gate before the expensive generation: confirm it really is a
+    # legal agreement. This is what lets right-click requests on pages the
+    # heuristic missed still be trusted enough to promote to the shared cache.
+    if deps.settings.llm_legal_check:
+        try:
+            if not await deps.provider.classify_legal(text):
+                metrics.inc("rejected_llm_not_legal")
+                return Outcome(422, detail="this page does not look like a legal agreement")
+        except ProviderError as e:
+            logger.warning("legal-check failed, proceeding to generate: %s", e)
+
     try:
         doc = await _generate(deps, text, doc_ver, hits)
     except ProviderError as e:
@@ -155,10 +173,13 @@ async def request_summary(
         return Outcome(502, detail="generation failed, try again later")
 
     deps.store.add_doc_version(
-        doc_ver, simhash, len(text), doc.source_language, source_verified, hits
+        doc_ver, simhash, len(text), doc.source_language, source_verified, hits, text
     )
     deps.store.save_summary(doc)
     if source_verified:
+        # Promotion: mapping url_key -> doc_version is what makes this summary
+        # visible to every other user who opens the same URL, including pages
+        # the local heuristic never detects (registry, docs/extension.md).
         deps.store.map_url(url_key, doc_ver, final_url)
     metrics.inc("generated")
     return await _serve(deps, doc, url_key, language, source="generated")
@@ -205,6 +226,9 @@ def _reserve_budget(deps: Deps, ip: str, source_verified: bool) -> Outcome | Non
 # ---------------------------------------------------------------- generation
 
 
+CONTEXT_RADIUS = 300
+
+
 async def _generate(
     deps: Deps, text: str, doc_ver: str, hits: dict[str, list[str]]
 ) -> SummaryDoc:
@@ -212,19 +236,19 @@ async def _generate(
     suspicious = _crosscheck_mismatches(checklist, hits)
     if suspicious:
         metrics.inc("crosscheck_retry")
-        notice = (
-            "A keyword scan found likely matches for these categories you marked "
-            f"not_addressed: {', '.join(sorted(suspicious))}. Re-examine the document for them; "
-            "only keep not_addressed if the document truly does not address them."
-        )
-        checklist, model_version = await deps.provider.generate_checklist(
-            text, deps.taxonomy, notice=notice
-        )
-        suspicious = _crosscheck_mismatches(checklist, hits)
-        if suspicious:
+        # Targeted re-check: send only the keyword-hit context for the suspected
+        # categories, not the whole document again (v4 C2, far cheaper).
+        windows = {cid: _context_windows(text, hits[cid]) for cid in suspicious}
+        subset = tuple(c for c in deps.taxonomy if c.id in suspicious)
+        try:
+            rechecked = await deps.provider.recheck_categories(windows, subset)
+            _merge_findings(checklist, rechecked)
+        except ProviderError as e:
+            logger.warning("recheck failed, keeping first pass: %s", e)
+        if _crosscheck_mismatches(checklist, hits):
             metrics.inc("crosscheck_mismatch")
 
-    findings = await _build_findings(deps, checklist, text, suspicious)
+    findings = await _build_findings(deps, checklist, text, _crosscheck_mismatches(checklist, hits))
     return SummaryDoc(
         doc_version=doc_ver,
         source_language=checklist.source_language,
@@ -239,28 +263,50 @@ async def _generate(
 def _crosscheck_mismatches(checklist: LLMChecklist, hits: dict[str, list[str]]) -> set[str]:
     reported = {c.id: c.status for c in checklist.categories}
     return {
-        cat_id
-        for cat_id in hits
-        if reported.get(cat_id, "not_addressed") == "not_addressed"
+        cat_id for cat_id in hits if reported.get(cat_id, "not_addressed") == "not_addressed"
     }
+
+
+def _context_windows(text: str, snippets: list[str]) -> str:
+    """Concatenate ±CONTEXT_RADIUS-char windows around each keyword hit, so the
+    recheck sees the real surrounding text without resending the whole document."""
+    lowered = text.lower()
+    spans: list[tuple[int, int]] = []
+    for snippet in snippets:
+        idx = lowered.find(snippet.lower())
+        if idx == -1:
+            continue
+        spans.append((max(0, idx - CONTEXT_RADIUS), min(len(text), idx + len(snippet) + CONTEXT_RADIUS)))
+    spans.sort()
+    merged: list[tuple[int, int]] = []
+    for start, end in spans:
+        if merged and start <= merged[-1][1]:
+            merged[-1] = (merged[-1][0], max(merged[-1][1], end))
+        else:
+            merged.append((start, end))
+    return " … ".join(text[start:end] for start, end in merged)
+
+
+def _merge_findings(checklist: LLMChecklist, rechecked: list[LLMCategoryFinding]) -> None:
+    by_id = {c.id: c for c in rechecked}
+    checklist.categories = [by_id.get(c.id, c) for c in checklist.categories]
 
 
 async def _build_findings(
     deps: Deps, checklist: LLMChecklist, text: str, suspicious: set[str]
 ) -> list[CategoryFinding]:
-    """Anchor quotes (v4 C4), verify claims (C5), apply the honesty rules."""
+    """Anchor quotes (v4 C4), then verify all claims in ONE batched call (C5)."""
     by_id = {c.id: c for c in checklist.categories}
-    findings: list[CategoryFinding] = []
+    drafts: dict[str, CategoryFinding] = {}
+    to_verify: list[tuple[str, str, list[str]]] = []
     for category in deps.taxonomy:
         raw = by_id.get(category.id)
         if raw is None or raw.status == "not_addressed":
-            findings.append(
-                CategoryFinding(
-                    id=category.id,
-                    title=category.title,
-                    status="not_addressed",
-                    confidence="possible" if category.id in suspicious else None,
-                )
+            drafts[category.id] = CategoryFinding(
+                id=category.id,
+                title=category.title,
+                status="not_addressed",
+                confidence="possible" if category.id in suspicious else None,
             )
             continue
         located: list[Quote] = []
@@ -270,32 +316,28 @@ async def _build_findings(
                 metrics.inc("quote_dropped")
             else:
                 located.append(Quote(text=quote_text, offset=hit[0]))
-        confidence = await _confidence(deps, raw.explanation, located)
-        findings.append(
-            CategoryFinding(
-                id=category.id,
-                title=category.title,
-                status="present",
-                severity=raw.severity or "medium",
-                explanation=raw.explanation,
-                quotes=located,
-                confidence=confidence,
-            )
+        drafts[category.id] = CategoryFinding(
+            id=category.id,
+            title=category.title,
+            status="present",
+            severity=raw.severity or "medium",
+            explanation=raw.explanation,
+            quotes=located,
+            confidence="possible",  # upgraded below only if anchored AND verified
         )
-    return findings
+        if located and raw.explanation:
+            to_verify.append((category.id, raw.explanation, [q.text for q in located]))
 
-
-async def _confidence(
-    deps: Deps, explanation: str | None, located: list[Quote]
-) -> str:
-    if not located or not explanation:
-        return "possible"  # high-stakes or not: no anchored evidence -> never "verified"
-    try:
-        supported = await deps.provider.verify_claim(explanation, [q.text for q in located])
-    except ProviderError:
-        metrics.inc("verifier_failed")
-        return "possible"
-    return "verified" if supported else "possible"
+    verdict: dict[str, bool] = {}
+    if to_verify:
+        try:
+            verdict = await deps.provider.verify_claims(to_verify)
+        except ProviderError:
+            metrics.inc("verifier_failed")
+    for cat_id, supported in verdict.items():
+        if supported:
+            drafts[cat_id].confidence = "verified"
+    return [drafts[c.id] for c in deps.taxonomy]
 
 
 # ---------------------------------------------------------------- responses
@@ -317,17 +359,19 @@ def _respond(
 ) -> SummaryResponse:
     row = deps.store.get_doc_version(doc.doc_version)
     verified = bool(row["source_verified"]) if row else False
+    disputed = deps.store.is_disputed(doc.doc_version)
     cached = None
     if language and language != doc.source_language:
         cached = deps.store.get_translation(doc.doc_version, language)
     if cached is not None:
-        return _apply_translation(doc, cached, url_key, language, verified)
+        return _apply_translation(doc, cached, url_key, language, verified, disputed)
     return SummaryResponse(
         **doc.model_dump(),
         url=url_key,
         language=doc.source_language,
         source=source,
         source_verified=verified,
+        disputed=disputed,
         disclaimer=DISCLAIMER,
     )
 
@@ -338,6 +382,7 @@ async def _translated_payload(
     """Translate explanations/tldr on demand — quotes stay source-language (v4 C9)."""
     row = deps.store.get_doc_version(doc.doc_version)
     verified = bool(row["source_verified"]) if row else False
+    disputed = deps.store.is_disputed(doc.doc_version)
     strings = deps.store.get_translation(doc.doc_version, language)
     if strings is None:
         explained = [c for c in doc.categories if c.explanation]
@@ -356,11 +401,11 @@ async def _translated_payload(
         }
         deps.store.save_translation(doc.doc_version, language, strings)
         metrics.inc("translated")
-    return _apply_translation(doc, strings, url_key, language, verified)
+    return _apply_translation(doc, strings, url_key, language, verified, disputed)
 
 
 def _apply_translation(
-    doc: SummaryDoc, strings: dict, url_key: str, language: str, verified: bool
+    doc: SummaryDoc, strings: dict, url_key: str, language: str, verified: bool, disputed: bool
 ) -> SummaryResponse:
     categories = []
     for c in doc.categories:
@@ -374,5 +419,6 @@ def _apply_translation(
         language=language,
         source="translated",
         source_verified=verified,
+        disputed=disputed,
         disclaimer=DISCLAIMER,
     )
