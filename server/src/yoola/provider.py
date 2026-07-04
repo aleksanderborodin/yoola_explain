@@ -77,7 +77,8 @@ Rules:
 - status is "present" if the document addresses the category, otherwise "not_addressed".
   Saying "not_addressed" is correct and expected when the document is silent.
 - {_FINDING_RULES}
-- Also produce "tldr": 3-5 plain-language bullets covering the most important points overall.
+- Also produce "tldr": 3-5 plain-language bullets covering the most important points
+  overall, written in the document's own language.
 - Answer with ONLY a JSON object of this exact shape:
 {{"source_language": "<BCP-47 code of the document's language, e.g. en, es>",
 "categories": [{{"id": one of [{ids}], "status": "present"|"not_addressed",
