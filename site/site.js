@@ -66,34 +66,7 @@ function esc(text) {
   return div.innerHTML;
 }
 
-/* ---------- hero specimen panel (index.html) ---------- */
-
-function renderSpecimen(mount, entry) {
-  mount.innerHTML = `
-    <div class="panel">
-      <div class="panel-hd"><span class="mark">Yoola</span><span class="panel-x">✕</span></div>
-      <div class="panel-bd">
-        <div class="verdict">
-          <div class="stamp g-${entry.grade}"><span>${entry.grade}</span></div>
-          <div><div class="verdict-word">${VERDICT[entry.grade]}</div>
-          <div class="verdict-meta">${entry.alerts} alerts · fresh analysis · ${esc(new URL(entry.url).hostname)}</div></div>
-        </div>
-        <h4>Watch out for</h4>
-        <div class="cards"></div>
-      </div>
-    </div>`;
-  const cards = mount.querySelector(".cards");
-  for (const c of entry.top) {
-    cards.appendChild(
-      el("div", `card sev-${c.severity}`, `
-        <div class="card-hd"><span class="dot"></span>${esc(c.title)}</div>
-        <p>${esc(c.explanation)}</p>
-        <div class="quote">“${esc(c.quote)}”</div>`)
-    );
-  }
-}
-
-/* ---------- directory (lookup.html) ---------- */
+/* ---------- directory ---------- */
 
 async function loadEntries() {
   if (YOOLA_API) {
@@ -110,15 +83,19 @@ async function loadEntries() {
   return { entries: DEMO_ENTRIES, live: false };
 }
 
-function renderDirectory(grid, entries, query) {
+function renderDirectory(grid, entries, query, grade) {
   grid.innerHTML = "";
   const q = (query || "").trim().toLowerCase();
-  const shown = entries.filter((e) => !q || e.url.toLowerCase().includes(q));
+  const shown = entries.filter(
+    (e) => (!q || e.url.toLowerCase().includes(q)) && (!grade || e.grade === grade)
+  );
   if (!shown.length) {
     grid.appendChild(
       el("div", "dir-empty",
-        `Nothing here for “${esc(query)}” yet. Open that site's terms with the Yoola
-         extension — your request adds it to this directory for everyone.`)
+        q
+          ? `Nothing here for “${esc(query)}” yet. Open that site's terms with the Yoola
+             extension — your request adds it to this directory for everyone.`
+          : `No entries with this grade yet.`)
     );
     return;
   }
@@ -128,7 +105,6 @@ function renderDirectory(grid, entries, query) {
       <div class="stamp g-${entry.grade}"><span>${entry.grade}</span></div>
       <div>
         <div class="dir-host">${esc(u.hostname)}</div>
-        <div class="dir-path">${esc(u.pathname)}</div>
         <div class="dir-meta">${VERDICT[entry.grade]} · ${entry.alerts} alert${entry.alerts === 1 ? "" : "s"}</div>
       </div>`);
     card.addEventListener("click", () => toggleDetail(grid, card, entry));
@@ -149,12 +125,33 @@ function toggleDetail(grid, card, entry) {
   card.after(detail);
 }
 
-async function initLookup() {
+async function initHome() {
   const grid = document.getElementById("dir-grid");
   const search = document.getElementById("dir-search");
   const note = document.getElementById("dir-note");
-  const { entries, live } = await loadEntries();
-  if (!live) note.textContent = "Showing sample entries — the live directory appears here once the public API is up.";
-  renderDirectory(grid, entries);
-  search.addEventListener("input", () => renderDirectory(grid, entries, search.value));
+  const scale = document.getElementById("scale");
+
+  // The grading scale: legend + directory filter in one.
+  let activeGrade = null;
+  let entries = [];
+  const refresh = () => renderDirectory(grid, entries, search.value, activeGrade);
+
+  const labels = { A: "fair", B: "mostly fair", C: "mixed", D: "harsh", E: "very harsh" };
+  for (const grade of ["A", "B", "C", "D", "E"]) {
+    const button = el("button", "scale-btn", `
+      <span class="stamp g-${grade}"><span>${grade}</span></span><span>${labels[grade]}</span>`);
+    button.addEventListener("click", () => {
+      activeGrade = activeGrade === grade ? null : grade;
+      scale.querySelectorAll(".scale-btn").forEach((b) => b.classList.remove("on"));
+      if (activeGrade) button.classList.add("on");
+      refresh();
+    });
+    scale.appendChild(button);
+  }
+
+  const loaded = await loadEntries();
+  entries = loaded.entries;
+  if (!loaded.live) note.textContent = "Sample entries shown — the live directory grows with every summary users request.";
+  refresh();
+  search.addEventListener("input", refresh);
 }

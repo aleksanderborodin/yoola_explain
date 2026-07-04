@@ -78,7 +78,7 @@ forces a paid regeneration (see Design v4 A2).
 
 ## GET /v1/directory?limit=…
 
-Public browse list for the website (`site/lookup.html`): one row per
+Public browse list for the website (the site home page): one row per
 server-verified, non-disputed URL.
 
 ```json

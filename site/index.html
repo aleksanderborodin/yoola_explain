@@ -3,8 +3,8 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Yoola — read the verdict before you agree</title>
-  <meta name="description" content="Yoola grades the fine print. A browser extension that turns terms of service into a checklist: alarming clauses first, every claim backed by a quote from the document." />
+  <title>Yoola — terms of service, graded</title>
+  <meta name="description" content="Look up any service's terms of service grade, A to E. Yoola turns the fine print into a stamped verdict — alarming clauses first, every claim quoted from the document." />
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
@@ -12,111 +12,75 @@
     <header class="site-hd">
       <a class="mark" href="index.html">Yoola</a>
       <nav class="nav">
-        <a href="lookup.html">Directory</a>
+        <a href="#how">How it works</a>
         <a href="https://github.com/aleksanderborodin/yoola_explain">GitHub</a>
       </nav>
     </header>
 
     <section class="hero">
-      <div class="fineprint" id="fineprint" aria-hidden="true"></div>
-      <div class="hero-copy">
-        <p class="eyebrow">The fine print, graded</p>
-        <h1>Nobody reads the terms. <em>Yoola reads them for the record.</em></h1>
-        <p class="lede">
-          One click turns any terms of service into a stamped verdict: a grade from A to E,
-          the alarming clauses first, and every claim backed by a verbatim quote you can
-          jump to in the document. Not legal advice — a second opinion, on the record.
-        </p>
-        <div class="cta-row">
-          <a class="btn primary" href="https://github.com/aleksanderborodin/yoola_explain">★ Star on GitHub</a>
-          <span class="btn soon">Chrome <span class="tag">soon</span></span>
-          <span class="btn soon">Firefox <span class="tag">soon</span></span>
-        </div>
-        <p class="fine-note">Open source. Free. No account. Your browsing history never leaves your machine.</p>
-      </div>
-      <div class="specimen" id="specimen"></div>
+      <h1>The fine print, graded.</h1>
+      <p class="lede">
+        Yoola reads terms of service so you see the verdict first: a stamp from A to E,
+        the alarming clauses on top, every claim quoted from the document itself.
+      </p>
+      <input class="search" id="dir-search" type="search"
+             placeholder="Look up a service — e.g. mozilla.org" autocomplete="off" autofocus />
+      <div class="scale" id="scale" role="group" aria-label="Filter by grade"></div>
+      <p class="scale-hint">The Yoola scale — tap a stamp to filter the directory.</p>
     </section>
 
-    <section class="block">
-      <h2>How it reads the fine print</h2>
-      <p class="block-lede">Yoola never summarizes on its own — it waits for you to ask. Then:</p>
+    <section class="directory">
+      <div class="dir-grid" id="dir-grid"></div>
+      <p class="dir-note" id="dir-note"></p>
+    </section>
+
+    <section class="block" id="how">
+      <h2>How it works</h2>
+      <p class="block-lede">A browser extension that waits for you to ask — it never summarizes on its own.</p>
       <div class="steps">
         <div class="step">
-          <div class="stamp step-seal"><span>1</span></div>
-          <h3>It notices, quietly</h3>
-          <p>A small tab appears on terms pages — and on signup pages that link to them,
-             where Yoola can review the linked documents without you leaving the form.
-             Detection runs entirely in your browser.</p>
+          <h3><span class="n">1</span>It notices, quietly</h3>
+          <p>A small tab appears on terms pages — and on signup forms that link to them,
+             where Yoola reviews the linked documents without you leaving the page.</p>
         </div>
         <div class="step">
-          <div class="stamp step-seal"><span>2</span></div>
-          <h3>One reading serves everyone</h3>
-          <p>Our server fetches the public document itself and analyzes it once.
-             Every later visitor gets the same summary instantly, from cache.
-             Nobody's page contents are uploaded.</p>
+          <h3><span class="n">2</span>One reading serves everyone</h3>
+          <p>The server fetches the public document and analyzes it once. Everyone after
+             gets the cached verdict instantly — and it lands in this directory.</p>
         </div>
         <div class="step">
-          <div class="stamp step-seal"><span>3</span></div>
-          <h3>Every claim is quoted</h3>
+          <h3><span class="n">3</span>Every claim is quoted</h3>
           <p>Fourteen clause checks — arbitration, auto-renewal, data sale, and more.
-             A claim only counts as verified when the exact source sentence anchors it.
-             Anything uncertain is marked “possible”, honestly.</p>
+             A claim counts only when the exact source sentence backs it; anything
+             uncertain is marked “possible”, honestly.</p>
         </div>
       </div>
     </section>
 
     <section class="block">
-      <h2>The fourteen checks</h2>
-      <p class="block-lede">Every document is examined against the same checklist, so grades are comparable across sites. The four in red are high-stakes.</p>
-      <div class="chips">
-        <span class="chip hs">Arbitration &amp; class-action waiver</span>
-        <span class="chip hs">Unilateral changes to terms</span>
-        <span class="chip hs">Automatic renewal &amp; billing</span>
-        <span class="chip hs">Sale or sharing of personal data</span>
-        <span class="chip">License over your content</span>
-        <span class="chip">Limitation of liability</span>
-        <span class="chip">Account termination</span>
-        <span class="chip">Governing law &amp; venue</span>
-        <span class="chip">Refunds</span>
-        <span class="chip">Indemnification</span>
-        <span class="chip">Tracking &amp; profiling</span>
-        <span class="chip">Children &amp; age limits</span>
-        <span class="chip">Warranty disclaimer</span>
-        <span class="chip">Data &amp; account deletion</span>
-      </div>
-      <p class="chips-note">If a document is silent on a check, Yoola says “not addressed” — silence is information too.</p>
-    </section>
-
-    <section class="block">
-      <h2>Our own terms score a D.</h2>
       <div class="dogfood">
         <div class="stamp g-D"><span>D</span></div>
         <div>
-          <p class="block-lede" style="margin-bottom:0">
-            We ran Yoola on Yoola's own terms of service — the long, lawyer-grade document
-            that governs this tool. Verdict: <strong>D, harsh terms.</strong> No warranties,
-            liability capped at ten dollars, no class actions. Like most software terms,
-            ours protect the operator. The difference is that we're the ones telling you,
-            in plain language, with the clauses quoted — before you agree. That's the product.
+          <h2>Our own terms score a D.</h2>
+          <p>
+            We ran Yoola on Yoola's own terms: no warranties, liability capped at ten dollars,
+            no class actions. Most software terms look like this — the difference is that
+            we're the ones telling you, with the clauses quoted, before you agree.
           </p>
-          <blockquote>
-            “THE SERVICE AND ALL SUMMARIES AND OTHER CONTENT ARE PROVIDED STRICTLY ON AN
-            ‘AS IS’ AND ‘AS AVAILABLE’ BASIS, WITH ALL FAULTS AND WITHOUT WARRANTY OF ANY
-            KIND WHATSOEVER.”
-            <cite>— Yoola Terms of Service §4.1, as flagged by Yoola (severity: high, verified)</cite>
-          </blockquote>
+          <p class="q">“…PROVIDED STRICTLY ON AN ‘AS IS’ AND ‘AS AVAILABLE’ BASIS, WITH ALL FAULTS AND
+             WITHOUT WARRANTY OF ANY KIND WHATSOEVER.” — Yoola ToS §4.1, flagged by Yoola: high severity, verified.</p>
         </div>
       </div>
     </section>
 
-    <section class="block">
-      <h2>Look a service up first</h2>
-      <p class="block-lede">
-        Every document anyone summarizes joins a shared public directory — one reading,
-        cached for everyone. Check whether a service has already been graded before
-        you sign up.
-      </p>
-      <a class="btn primary" href="lookup.html">Browse the directory →</a>
+    <section class="block" style="text-align:center">
+      <h2>Get Yoola</h2>
+      <p class="block-lede" style="margin:0 auto 22px">Open source, free, no account. Your browsing history never leaves your machine.</p>
+      <div class="cta-row">
+        <a class="btn primary" href="https://github.com/aleksanderborodin/yoola_explain">★ Star on GitHub</a>
+        <span class="btn soon">Chrome <span class="tag">soon</span></span>
+        <span class="btn soon">Firefox <span class="tag">soon</span></span>
+      </div>
     </section>
 
     <footer class="site-ft">
@@ -126,12 +90,6 @@
   </div>
 
   <script src="site.js"></script>
-  <script>
-    renderSpecimen(document.getElementById("specimen"), DEMO_ENTRIES[0]);
-    // Ambient fine print behind the hero — the raw material Yoola digests.
-    const fp = document.getElementById("fineprint");
-    const boilerplate = "WHEREAS the User, by accessing, browsing, or otherwise availing themselves of the Services, irrevocably covenants and agrees to be bound, without limitation or qualification, by each and every provision herein set forth, including such provisions as may hereafter be amended, restated, supplemented, or otherwise modified at the sole and absolute discretion of the Provider, its successors and permitted assigns; ";
-    fp.textContent = boilerplate.repeat(24);
-  </script>
+  <script>initHome();</script>
 </body>
 </html>
