@@ -232,7 +232,13 @@ class OpenAICompatProvider(LLMProvider):
             max_tokens=60 + 20 * len(items),
         )
         results = _extract_json(reply).get("results", [])
-        verdict = {r.get("key"): bool(r.get("supported") is True) for r in results}
+        # Models sometimes return strings or partial objects here (seen live:
+        # gemma answered a list of strings for a Russian PDF). Anything that
+        # isn't a proper entry counts as unverified — never a crash.
+        verdict: dict = {}
+        for r in results:
+            if isinstance(r, dict):
+                verdict[r.get("key")] = r.get("supported") is True
         return {key: verdict.get(key, False) for key, _, _ in items}
 
     async def translate(self, strings: list[str], target_language: str) -> list[str]:
