@@ -56,3 +56,12 @@ Fix one → delete it here. Discover one → add it, same session.
 13. **Headless screenshots capture load animations mid-flight.** The panel/stamp
     fade+scale in; a bare `--screenshot` catches them at opacity 0. Use
     `--virtual-time-budget=3000` to let them settle before capturing.
+14. **"Can't reach the Yoola server" on some ISPs = SNI-based DPI, not our bug.**
+    Diagnosed on the dev machine's ISP: TCP to the box's 443 connects, a TLS
+    handshake with a *fake* SNI gets Caddy's alert instantly, but a ClientHello
+    carrying `yoola-explain.aleksanderbor.ru` is silently dropped (timeout).
+    The server is healthy — LE validators completed handshakes with that exact
+    SNI from four regions. Do NOT add client fallbacks for this; verify with
+    `curl -k --resolve fake.test:443:<ip> https://fake.test/healthz` (works) vs
+    the real hostname (hangs). Remedy if it affects real users: front the domain
+    with a proxy whose IPs the DPI passes (e.g. Cloudflare), or ECH when mature.
