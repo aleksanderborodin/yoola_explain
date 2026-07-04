@@ -45,8 +45,8 @@ file that touches the network.
 - `content.js` — the detection tab + the shadow-DOM "dossier" panel: the
   **verdict stamp** (A–E seal, the signature element), alerts-first cards,
   in-brief bullets, collapsible full checklist, disputed/unverified warnings,
-  per-clause "report wrong", quote highlighting. Committed dark graphite+brass
-  look (a deliberate single theme — it's the tool's identity, not the page's).
+  per-clause "report wrong", quote highlighting. Styled to match the website:
+  warm paper, ink type, colored stamp seals (one visual system across product).
 - `background.js` — service worker. Per request: L1 → `GET /v1/summary` →
   `POST /v1/summary` (→ on 502, asks content for `clientContent` and retries).
   Owns the L1 LRU cache, the badge, the right-click menu, and `syncRegistry()`.

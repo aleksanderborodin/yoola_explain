@@ -4,27 +4,29 @@
     <meta charset="utf-8" />
     <style>
       :root {
-        --ink: #171A21; --raised: #1E222B; --line: #2B3140;
-        --fg: #ECEEF2; --fg2: #9AA3B2; --brass: #C9A24B; --brass-hi: #DDB65E;
+        --paper: #F7F3EB; --card: #FFFFFF; --line: #E4DDCC;
+        --ink: #201F1A; --ink2: #6F6A5D; --ink3: #9B9484;
+        --brass: #8C6D1F; --brass-soft: #B8912F;
       }
       * { box-sizing: border-box; }
       body {
         font-family: -apple-system, "Segoe UI", Roboto, sans-serif;
-        width: 268px; margin: 0; padding: 16px; background: var(--ink); color: var(--fg);
+        width: 268px; margin: 0; padding: 16px; background: var(--paper); color: var(--ink);
         -webkit-font-smoothing: antialiased;
       }
       .mark {
         font-family: "Iowan Old Style", Palatino, Georgia, serif;
-        font-weight: 700; font-size: 19px; letter-spacing: .4px; color: var(--brass);
+        font-weight: 700; font-size: 19px; letter-spacing: .3px; color: var(--ink);
       }
-      .tagline { color: var(--fg2); font-size: 12px; margin: 4px 0 14px; line-height: 1.45; }
+      .mark::after { content: "."; color: var(--brass-soft); }
+      .tagline { color: var(--ink2); font-size: 12px; margin: 4px 0 14px; line-height: 1.45; }
       button {
-        width: 100%; padding: 10px; border-radius: 10px; border: 1px solid var(--brass);
-        background: linear-gradient(180deg, rgba(201,162,75,.14), rgba(201,162,75,.05));
-        color: var(--brass-hi); cursor: pointer; font-size: 13.5px; font-weight: 600;
+        width: 100%; padding: 10px; border-radius: 10px; border: 1px solid var(--ink);
+        background: var(--ink); color: var(--paper); cursor: pointer;
+        font-size: 13.5px; font-weight: 600;
       }
-      button:hover { background: rgba(201,162,75,.2); }
-      .fine { color: var(--fg2); margin: 12px 0 0; font-size: 11px; line-height: 1.5; }
+      button:hover { background: #35332B; }
+      .fine { color: var(--ink3); margin: 12px 0 0; font-size: 11px; line-height: 1.5; }
     </style>
   </head>
   <body>
