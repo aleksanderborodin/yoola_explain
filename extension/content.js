@@ -1,574 +1,210 @@
-/**
- * Yoola - Content Script
- * This script runs in the context of web pages to detect and extract Terms of Service content
- */
+// Yoola content script: quiet detection pill + summary panel.
+// Auto-DETECT, never auto-summarize (Design v4 §5): nothing leaves the page
+// until the user clicks.
 
-// Check if the script has already been injected
-if (window.yoolaAlreadyInjected) {
-  console.log('Yoola content script already injected, not reinitializing');
-} else {
-  window.yoolaAlreadyInjected = true;
-  
-  // Define the content script class - not exposed globally to avoid conflicts
-  const YoolaContentScript = class {
-  constructor() {
-    this.initialized = false;
-    this.termsPatterns = [
-      /terms\s*of\s*service/i,
-      /terms\s*of\s*use/i,
-      /user\s*agreement/i,
-      /legal\s*terms/i,
-      /privacy\s*policy/i,
-      /eula/i,
-      /end\s*user\s*license\s*agreement/i
-    ];
-    
-    this.loadingOverlay = null;
-    this.currentLanguage = null;
-    
-    this.init();
+(() => {
+  if (window.__yoolaLoaded) return;
+  window.__yoolaLoaded = true;
+
+  const SEVERITY_ORDER = { high: 0, medium: 1, low: 2 };
+  let host = null;
+  let shadow = null;
+
+  if (yoolaDetectLegalPage()) {
+    chrome.runtime.sendMessage({ type: "detected" });
+    mountPill();
   }
 
-  init() {
-    if (this.initialized) return;
-    
-    // Listen for messages from the background script
-    chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-      try {
-        if (message.action === 'ping') {
-          // This helps detect if the content script is ready
-          console.log('Content script received ping');
-          sendResponse({ status: 'ready' });
-        } else if (message.action === 'extractContent') {
-          const content = this.extractPageContent();
-          sendResponse({ content });
-        } else if (message.action === 'showSummary') {
-          this.showSummary(message.summary);
-          sendResponse({ success: true });
-        } else if (message.action === 'detectTermsLinks') {
-          const links = this.findTermsLinks();
-          sendResponse({ links });
-        } else if (message.action === 'showLoadingOverlay') {
-          this.showLoadingOverlay(message.message || 'Loading...');
-          sendResponse({ success: true });
-        } else if (message.action === 'updateLoadingStatus') {
-          this.updateLoadingStatus(message.message || 'Processing...');
-          sendResponse({ success: true });
-        } else if (message.action === 'hideLoadingOverlay') {
-          this.hideLoadingOverlay();
-          sendResponse({ success: true });
-        }
-        return true; // Keep the message channel open for async responses
-      } catch (error) {
-        console.error('Error handling message in content script:', error);
-        sendResponse({ error: error.message });
-        return true;
-      }
-    });
+  function ui() {
+    if (shadow) return shadow;
+    host = document.createElement("div");
+    host.id = "yoola-host";
+    shadow = host.attachShadow({ mode: "open" });
+    const style = document.createElement("style");
+    style.textContent = CSS;
+    shadow.appendChild(style);
+    document.documentElement.appendChild(host);
+    return shadow;
+  }
 
-    // Mark the links to Terms of Service on page load
-    try {
-      this.highlightTermsLinks();
-    } catch (error) {
-      console.error('Error highlighting terms links:', error);
-    }
-    
-    // Load the user's preferred language
-    try {
-      chrome.storage.sync.get(['preferredLanguage'], (result) => {
-        this.currentLanguage = result.preferredLanguage || 'English';
+  function mountPill() {
+    const root = ui();
+    const pill = document.createElement("button");
+    pill.className = "pill";
+    pill.textContent = "📄 Terms detected — summarize?";
+    pill.title = "Yoola: summarize this legal page";
+    pill.addEventListener("click", () => {
+      pill.remove();
+      summarize();
+    });
+    root.appendChild(pill);
+  }
+
+  chrome.runtime.onMessage.addListener((msg) => {
+    if (msg.type === "summarize-current") summarize();
+  });
+
+  async function summarize() {
+    const root = ui();
+    root.querySelector(".panel")?.remove();
+    const panel = document.createElement("div");
+    panel.className = "panel";
+    panel.innerHTML = `<div class="hd"><span class="logo">Yoola</span><button class="x">×</button></div>
+      <div class="bd"><p class="status">Summarizing…</p></div>`;
+    panel.querySelector(".x").addEventListener("click", () => panel.remove());
+    root.appendChild(panel);
+    const body = panel.querySelector(".bd");
+
+    const language = (navigator.language || "en").split("-")[0];
+    let reply = await chrome.runtime.sendMessage({
+      type: "summarize",
+      url: location.href,
+      language,
+    });
+    if (reply?.needClientContent) {
+      body.querySelector(".status").textContent =
+        "Site blocks our server — sending the page text instead…";
+      reply = await chrome.runtime.sendMessage({
+        type: "summarize",
+        url: location.href,
+        language,
+        clientContent: yoolaExtractText(),
       });
-    } catch (error) {
-      console.error('Error getting preferred language:', error);
-      this.currentLanguage = 'English'; // Default fallback
     }
-    
-    this.initialized = true;
-    console.log('Yoola content script initialized');
-  }
-
-  /**
-   * Extract content from the current page
-   * This attempts to identify and extract only the relevant terms of service text
-   */
-  extractPageContent() {
-    // First try to find the main content area
-    const article = document.querySelector('article');
-    const main = document.querySelector('main');
-    const contentDiv = document.querySelector('.content, #content, .terms, #terms');
-    
-    let contentElement = article || main || contentDiv || document.body;
-    
-    // If we're on a frame with very little content, use the parent document
-    if (contentElement.textContent.trim().length < 1000 && window !== window.top) {
-      return { 
-        error: 'Content too short, may be in a frame',
-        isFrame: true
-      };
+    if (!reply?.ok) {
+      body.innerHTML = `<p class="status err">${escapeHtml(reply?.detail || "Something went wrong.")}</p>`;
+      return;
     }
-    
-    return {
-      domain: window.location.hostname,
-      url: window.location.href,
-      title: document.title,
-      content: contentElement.textContent.trim()
-    };
+    render(body, reply.payload, reply.fromL1);
   }
 
-  /**
-   * Find links that might point to Terms of Service pages
-   */
-  findTermsLinks() {
-    const links = [];
-    const allLinks = document.querySelectorAll('a');
-    
-    allLinks.forEach(link => {
-      const href = link.getAttribute('href');
-      const text = link.textContent.toLowerCase();
-      
-      if (!href) return;
-      
-      // Check if the link text matches common terms patterns
-      const isTermsLink = this.termsPatterns.some(pattern => pattern.test(text));
-      
-      if (isTermsLink) {
-        links.push({
-          href: href,
-          text: link.textContent.trim(),
-          x: link.getBoundingClientRect().left + window.scrollX,
-          y: link.getBoundingClientRect().top + window.scrollY
-        });
-      }
-    });
-    
-    return links;
-  }
+  function render(body, s, fromL1) {
+    const present = s.categories
+      .filter((c) => c.status === "present")
+      .sort((a, b) => SEVERITY_ORDER[a.severity] - SEVERITY_ORDER[b.severity]);
+    const alerts = present.filter((c) => c.severity !== "low");
+    const notAddressed = s.categories.filter((c) => c.status === "not_addressed");
+    const sourceLabel = fromL1 ? "offline · cached" : s.source;
 
-  /**
-   * Add visual indicators to terms links
-   */
-  highlightTermsLinks() {
-    const links = this.findTermsLinks();
-    
-    links.forEach(linkInfo => {
-      const elementsAtPoint = document.elementsFromPoint(linkInfo.x, linkInfo.y);
-      const linkElement = elementsAtPoint.find(el => el.tagName === 'A');
-      
-      if (linkElement) {
-        linkElement.classList.add('yoola-terms-link');
-        // Create a small icon next to the link
-        const icon = document.createElement('span');
-        icon.classList.add('yoola-terms-icon');
-        icon.innerHTML = '📝';
-        icon.title = 'Summarize with Yoola';
-        icon.style.marginLeft = '4px';
-        icon.style.cursor = 'pointer';
-        icon.style.fontSize = '14px';
-        
-        icon.addEventListener('click', (e) => {
-          e.preventDefault();
-          e.stopPropagation();
-          
-          // Tell the background script to follow this link and get terms
-          chrome.runtime.sendMessage({
-            action: 'summarizeTermsLink',
-            url: linkElement.href
-          });
-        });
-        
-        linkElement.parentNode.insertBefore(icon, linkElement.nextSibling);
-      }
-    });
-  }
+    body.innerHTML = `
+      <div class="meta">
+        <span class="grade g${s.grade}">${s.grade}</span>
+        <span class="badge">${escapeHtml(sourceLabel)}</span>
+        ${s.source_verified === false ? '<span class="badge warn">unverified source</span>' : ""}
+      </div>
+      <h3>⚠️ Alerts</h3>
+      <div class="alerts"></div>
+      <h3>TL;DR</h3>
+      <ul class="tldr">${s.tldr.map((t) => `<li>${escapeHtml(t)}</li>`).join("")}</ul>
+      <details><summary>All ${s.categories.length} checks</summary><div class="all"></div></details>
+      <p class="disclaimer">${escapeHtml(s.disclaimer)}</p>`;
 
-  /**
-   * Shows a loading overlay while waiting for the API
-   */
-  showLoadingOverlay(message) {
-    // Remove any existing overlays first
-    this.hideLoadingOverlay();
-    
-    // Create the loading overlay
-    const overlay = document.createElement('div');
-    overlay.id = 'yoola-loading-overlay';
-    overlay.style.cssText = `
-      position: fixed;
-      top: 0;
-      left: 0;
-      width: 100%;
-      height: 100%;
-      background-color: rgba(0, 0, 0, 0.7);
-      z-index: 10000;
-      display: flex;
-      flex-direction: column;
-      justify-content: center;
-      align-items: center;
-      font-family: Arial, sans-serif;
-      color: white;
-    `;
-    
-    // Create spinner
-    const spinner = document.createElement('div');
-    spinner.style.cssText = `
-      width: 40px;
-      height: 40px;
-      margin-bottom: 20px;
-      border: 4px solid rgba(255, 255, 255, 0.3);
-      border-radius: 50%;
-      border-top-color: white;
-      animation: yoola-spin 1s linear infinite;
-    `;
-    
-    // Add animation style
-    const style = document.createElement('style');
-    style.textContent = `
-      @keyframes yoola-spin {
-        to { transform: rotate(360deg); }
-      }
-    `;
-    document.head.appendChild(style);
-    
-    // Add message
-    const messageElem = document.createElement('div');
-    messageElem.id = 'yoola-loading-message';
-    messageElem.textContent = message;
-    messageElem.style.cssText = `
-      font-size: 16px;
-      font-weight: bold;
-      margin-bottom: 10px;
-      text-align: center;
-      max-width: 80%;
-    `;
-    
-    // Add cancel button
-    const cancelButton = document.createElement('button');
-    cancelButton.textContent = 'Cancel';
-    cancelButton.style.cssText = `
-      margin-top: 20px;
-      padding: 8px 16px;
-      background-color: transparent;
-      border: 1px solid white;
-      color: white;
-      border-radius: 4px;
-      cursor: pointer;
-      font-size: 14px;
-    `;
-    cancelButton.addEventListener('click', () => this.hideLoadingOverlay());
-    
-    overlay.appendChild(messageElem);
-    overlay.appendChild(spinner);
-    overlay.appendChild(cancelButton);
-    document.body.appendChild(overlay);
-    
-    this.loadingOverlay = overlay;
-  }
-  
-  /**
-   * Updates the loading status message
-   */
-  updateLoadingStatus(message) {
-    if (this.loadingOverlay) {
-      const messageElem = document.getElementById('yoola-loading-message');
-      if (messageElem) {
-        messageElem.textContent = message;
-      }
-    } else {
-      // If no overlay exists yet, create one
-      this.showLoadingOverlay(message);
+    const alertsBox = body.querySelector(".alerts");
+    if (!alerts.length) alertsBox.innerHTML = '<p class="none">No high-severity clauses found.</p>';
+    for (const c of alerts) alertsBox.appendChild(categoryCard(c, s.doc_version));
+
+    const allBox = body.querySelector(".all");
+    for (const c of present.filter((c) => c.severity === "low")) {
+      allBox.appendChild(categoryCard(c, s.doc_version));
     }
-  }
-  
-  /**
-   * Hides the loading overlay
-   */
-  hideLoadingOverlay() {
-    if (this.loadingOverlay) {
-      this.loadingOverlay.remove();
-      this.loadingOverlay = null;
-    }
+    const na = document.createElement("p");
+    na.className = "none";
+    na.textContent = "Not addressed: " + notAddressed.map((c) => c.title).join(", ");
+    allBox.appendChild(na);
   }
 
-  /**
-   * Display the summary in a modal overlay
-   */
-  showSummary(summary) {
-    // Hide any loading overlay first
-    this.hideLoadingOverlay();
-    
-    // Remove any existing summary modals
-    const existingModal = document.getElementById('yoola-summary-modal');
-    if (existingModal) {
-      existingModal.remove();
+  function categoryCard(c, docVersion) {
+    const card = document.createElement("div");
+    card.className = `card sev-${c.severity}`;
+    card.innerHTML = `
+      <div class="row">
+        <strong>${escapeHtml(c.title)}</strong>
+        <span class="sev">${c.severity}</span>
+        ${c.confidence === "possible" ? '<span class="badge warn">possible — verify</span>' : ""}
+      </div>
+      <p>${escapeHtml(c.explanation || "")}</p>`;
+    for (const quote of c.quotes || []) {
+      const link = document.createElement("button");
+      link.className = "quotelink";
+      link.textContent = "verify in page →";
+      link.title = quote.text;
+      link.addEventListener("click", () => highlight(quote.text));
+      card.appendChild(link);
     }
-
-    // Create modal container
-    const modal = document.createElement('div');
-    modal.id = 'yoola-summary-modal';
-    modal.style.cssText = `
-      position: fixed;
-      top: 0;
-      left: 0;
-      width: 100%;
-      height: 100%;
-      background-color: rgba(0, 0, 0, 0.7);
-      z-index: 10000;
-      display: flex;
-      justify-content: center;
-      align-items: center;
-      font-family: Arial, sans-serif;
-    `;
-
-    // Create modal content
-    const modalContent = document.createElement('div');
-    modalContent.style.cssText = `
-      background-color: white;
-      padding: 20px;
-      border-radius: 8px;
-      max-width: 800px;
-      max-height: 80vh;
-      overflow-y: auto;
-      position: relative;
-      box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
-    `;
-
-    // Create close button
-    const closeButton = document.createElement('button');
-    closeButton.textContent = '×';
-    closeButton.style.cssText = `
-      position: absolute;
-      top: 10px;
-      right: 10px;
-      background: none;
-      border: none;
-      font-size: 24px;
-      cursor: pointer;
-      color: #333;
-    `;
-    closeButton.addEventListener('click', () => modal.remove());
-    modalContent.appendChild(closeButton);
-
-    // Create title
-    const title = document.createElement('h2');
-    title.textContent = 'Terms of Service Summary';
-    title.style.cssText = `
-      margin-top: 0;
-      color: #333;
-      border-bottom: 1px solid #eee;
-      padding-bottom: 10px;
-    `;
-    modalContent.appendChild(title);
-
-    // Language selection
-    const languageContainer = document.createElement('div');
-    languageContainer.style.cssText = `
-      margin-bottom: 15px;
-      display: flex;
-      align-items: center;
-    `;
-    
-    const languageLabel = document.createElement('label');
-    languageLabel.textContent = 'Summary Language: ';
-    languageLabel.style.marginRight = '10px';
-    
-    const languageSelect = document.createElement('select');
-    languageSelect.id = 'yoola-language-select';
-    
-    // These should match the languages in the README
-    const languages = [
-      { name: 'English', code: 'English' },
-      { name: 'Spanish', code: 'Spanish' },
-      { name: 'Russian', code: 'Russian' },
-      { name: 'French', code: 'French' },
-      { name: 'German', code: 'German' },
-      { name: 'Italian', code: 'Italian' },
-      { name: 'Mandarin Chinese', code: 'Mandarin Chinese' },
-      { name: 'Hindi', code: 'Hindi' },
-      { name: 'Portuguese', code: 'Portuguese' },
-      { name: 'Japanese', code: 'Japanese' },
-      { name: 'Korean', code: 'Korean' }
-    ];
-    
-    languages.forEach(lang => {
-      const option = document.createElement('option');
-      option.value = lang.code;
-      option.textContent = lang.name;
-      languageSelect.appendChild(option);
-    });
-    
-    // Get current language from the summary or storage
-    const currentLang = summary.language || this.currentLanguage || 'English';
-    languageSelect.value = currentLang;
-    
-    // Cache generation status info
-    let generationInfo = '';
-    if (summary.fromCache === false) {
-      generationInfo = `<div style="font-size: 12px; color: #666; margin-top: 5px;">New summary generated in ${(summary.generationTime/1000).toFixed(1)}s</div>`;
-    }
-    const generationInfoElement = document.createElement('div');
-    generationInfoElement.innerHTML = generationInfo;
-    generationInfoElement.style.marginLeft = '10px';
-    
-    // Change language handler
-    languageSelect.addEventListener('change', () => {
-      const selectedLanguage = languageSelect.value;
-      
-      // Save preference
-      chrome.storage.sync.set({ preferredLanguage: selectedLanguage });
-      this.currentLanguage = selectedLanguage;
-      
-      // Show loading overlay
-      this.hideLoadingOverlay();
-      this.showLoadingOverlay(`Generating summary in ${selectedLanguage}...`);
-      
-      // Request new summary
-      chrome.runtime.sendMessage({
-        action: 'getSummaryInLanguage',
-        language: selectedLanguage,
-        domain: summary.domain,
-        url: summary.url,
-        content: summary.content
-      }, (response) => {
-        this.hideLoadingOverlay();
-        if (response && response.summary) {
-          // Update the modal with the new summary
-          this.showSummary(response.summary);
-        } else {
-          // Show error but keep the current summary
-          const errorElement = document.createElement('div');
-          errorElement.style.cssText = `
-            color: #e74c3c;
-            padding: 10px;
-            margin-top: 10px;
-            background-color: #fadbd8;
-            border-radius: 4px;
-            text-align: center;
-          `;
-          errorElement.textContent = 'Error fetching summary in the selected language.';
-          summaryContent.prepend(errorElement);
-        }
+    const report = document.createElement("button");
+    report.className = "report";
+    report.textContent = "report wrong";
+    report.addEventListener("click", async () => {
+      report.disabled = true;
+      report.textContent = "reported ✓";
+      await chrome.runtime.sendMessage({
+        type: "report",
+        docVersion,
+        category: c.id,
       });
     });
-    
-    languageContainer.appendChild(languageLabel);
-    languageContainer.appendChild(languageSelect);
-    languageContainer.appendChild(generationInfoElement);
-    modalContent.appendChild(languageContainer);
-
-    // Create summary content
-    const summaryContent = document.createElement('div');
-    summaryContent.style.cssText = `
-      line-height: 1.5;
-    `;
-    
-    // Populate the summary content
-    if (summary.error) {
-      summaryContent.innerHTML = `<p>Error: ${summary.error}</p>`;
-    } else {
-      this.populateSummaryContent(summaryContent, summary);
-    }
-    
-    modalContent.appendChild(summaryContent);
-
-    // Add attribution
-    const attribution = document.createElement('div');
-    attribution.innerHTML = `
-      <hr style="margin: 20px 0; border: none; border-top: 1px solid #eee;">
-      <p style="text-align: center; color: #888; font-size: 12px;">
-        Powered by Yoola AI Terms Summarizer
-      </p>
-    `;
-    modalContent.appendChild(attribution);
-
-    // Add modal to page
-    modal.appendChild(modalContent);
-    document.body.appendChild(modal);
-
-    // Close on click outside
-    modal.addEventListener('click', (event) => {
-      if (event.target === modal) {
-        modal.remove();
-      }
-    });
-
-    // Close on escape key
-    document.addEventListener('keydown', (event) => {
-      if (event.key === 'Escape') {
-        modal.remove();
-      }
-    }, { once: true });
+    card.appendChild(report);
+    return card;
   }
 
-  /**
-   * Populate the summary content in the modal
-   */
-  populateSummaryContent(container, summary) {
-    // Clear previous content
-    container.innerHTML = '';
-    
-    // Key points section
-    const keyPointsSection = document.createElement('div');
-    keyPointsSection.innerHTML = `
-      <h3 style="color: #444;">Key Points</h3>
-      <ul style="padding-left: 20px;"></ul>
-    `;
-    
-    const keyPointsList = keyPointsSection.querySelector('ul');
-    
-    if (summary.key_points && summary.key_points.length > 0) {
-      summary.key_points.forEach(point => {
-        const li = document.createElement('li');
-        li.textContent = point;
-        li.style.marginBottom = '8px';
-        keyPointsList.appendChild(li);
-      });
-    } else {
-      keyPointsList.innerHTML = '<li>No key points available</li>';
+  // Locate a quote in the live DOM. Offsets into extracted text are useless
+  // here (v4 C4) — we search for the quote text itself, shrinking the prefix
+  // until window.find succeeds.
+  function highlight(quote) {
+    const attempts = [quote, quote.slice(0, 80), quote.slice(0, 50), quote.slice(0, 30)];
+    window.getSelection()?.removeAllRanges();
+    for (const attempt of attempts) {
+      const needle = attempt.replace(/\s+/g, " ").trim();
+      if (needle.length >= 12 && window.find(needle, false, false, true, false, true, false)) {
+        return;
+      }
     }
-    
-    container.appendChild(keyPointsSection);
-    
-    // Data collection section
-    const dataSection = document.createElement('div');
-    dataSection.innerHTML = `
-      <h3 style="color: #444; margin-top: 20px;">Data Collection</h3>
-      <p>${summary.data_collection_summary || 'No data collection information available'}</p>
-    `;
-    container.appendChild(dataSection);
-    
-    // User rights section
-    const rightsSection = document.createElement('div');
-    rightsSection.innerHTML = `
-      <h3 style="color: #444; margin-top: 20px;">User Rights</h3>
-      <p>${summary.user_rights_summary || 'No user rights information available'}</p>
-    `;
-    container.appendChild(rightsSection);
-    
-    // Alerts and warnings section
-    const alertsSection = document.createElement('div');
-    alertsSection.innerHTML = `
-      <h3 style="color: #444; margin-top: 20px;">Alerts & Warnings</h3>
-      <ul style="padding-left: 20px;"></ul>
-    `;
-    
-    const alertsList = alertsSection.querySelector('ul');
-    
-    if (summary.alerts_and_warnings && summary.alerts_and_warnings.length > 0) {
-      summary.alerts_and_warnings.forEach(alert => {
-        const li = document.createElement('li');
-        li.textContent = alert;
-        li.style.marginBottom = '8px';
-        li.style.color = '#d32f2f';
-        alertsList.appendChild(li);
-      });
-    } else {
-      alertsList.innerHTML = '<li>No alerts available</li>';
-    }
-    
-    container.appendChild(alertsSection);
   }
-}
 
-  // Initialize the content script when this runs for the first time
-  window.yoolaContent = new YoolaContentScript();
-}
+  function escapeHtml(text) {
+    const div = document.createElement("div");
+    div.textContent = text ?? "";
+    return div.innerHTML;
+  }
 
+  const CSS = `
+    :host { all: initial; }
+    * { box-sizing: border-box; font-family: -apple-system, "Segoe UI", Roboto, sans-serif; }
+    .pill { position: fixed; right: 16px; bottom: 16px; z-index: 2147483647;
+      background: #1a1c22; color: #f5f6f8; border: 1px solid #3a3f4a; border-radius: 999px;
+      padding: 9px 14px; font-size: 13px; cursor: pointer; box-shadow: 0 4px 14px rgba(0,0,0,.35); }
+    .pill:hover { background: #262a33; }
+    .panel { position: fixed; top: 12px; right: 12px; bottom: 12px; width: 380px; max-width: 92vw;
+      z-index: 2147483647; background: #14161b; color: #e8eaee; border: 1px solid #30343d;
+      border-radius: 12px; display: flex; flex-direction: column; overflow: hidden;
+      box-shadow: 0 8px 30px rgba(0,0,0,.5); font-size: 13.5px; line-height: 1.45; }
+    .hd { display: flex; justify-content: space-between; align-items: center;
+      padding: 10px 14px; border-bottom: 1px solid #262a33; }
+    .logo { font-weight: 700; letter-spacing: .4px; }
+    .x { background: none; border: none; color: #9aa1ad; font-size: 20px; cursor: pointer; }
+    .bd { padding: 12px 14px; overflow-y: auto; }
+    .status { color: #9aa1ad; } .status.err { color: #ff8080; }
+    .meta { display: flex; gap: 8px; align-items: center; margin-bottom: 10px; }
+    .grade { width: 34px; height: 34px; border-radius: 8px; display: inline-flex;
+      align-items: center; justify-content: center; font-weight: 800; font-size: 18px; color: #101216; }
+    .gA { background: #7ade8a; } .gB { background: #b8e07a; } .gC { background: #f0d060; }
+    .gD { background: #f0a050; } .gE { background: #f07070; }
+    .badge { font-size: 11px; padding: 2px 8px; border-radius: 999px; background: #262a33; color: #aeb6c2; }
+    .badge.warn { background: #4a3a1a; color: #f0c060; }
+    h3 { margin: 12px 0 6px; font-size: 12px; text-transform: uppercase; letter-spacing: .6px; color: #9aa1ad; }
+    .tldr { margin: 4px 0; padding-left: 18px; } .tldr li { margin: 3px 0; }
+    .card { border: 1px solid #262a33; border-left-width: 3px; border-radius: 8px; padding: 8px 10px; margin: 6px 0; }
+    .card.sev-high { border-left-color: #f07070; } .card.sev-medium { border-left-color: #f0d060; }
+    .card.sev-low { border-left-color: #4a5160; }
+    .card p { margin: 4px 0; color: #c8cdd6; }
+    .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+    .sev { font-size: 10px; text-transform: uppercase; color: #9aa1ad; }
+    .quotelink, .report { background: none; border: none; color: #7ab8f0; cursor: pointer;
+      font-size: 12px; padding: 2px 8px 2px 0; }
+    .report { color: #8a919d; } .report:hover { color: #f0a0a0; }
+    details { margin-top: 8px; } summary { cursor: pointer; color: #9aa1ad; }
+    .none { color: #8a919d; font-size: 12.5px; }
+    .disclaimer { margin-top: 14px; padding-top: 8px; border-top: 1px solid #262a33;
+      color: #8a919d; font-size: 11.5px; }
+  `;
+})();

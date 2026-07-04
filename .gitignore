@@ -69,3 +69,6 @@ htmlcov/
 nosetests.xml
 coverage.xml
 *.cover
+
+# Hosting server credentials/notes (never commit)
+server.md

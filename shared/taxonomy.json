@@ -1,0 +1,103 @@
+{
+  "version": 1,
+  "categories": [
+    {
+      "id": "arbitration",
+      "title": "Arbitration & class-action waiver",
+      "high_stakes": true,
+      "hint": "Mandatory/binding arbitration, waiver of class actions or jury trial, dispute resolution forced out of court.",
+      "keywords": ["binding arbitration", "arbitrat\\w+", "class[- ]action waiver", "waive.{0,40}(class action|jury)", "jury trial"]
+    },
+    {
+      "id": "unilateral_changes",
+      "title": "Unilateral changes to terms",
+      "high_stakes": true,
+      "hint": "The company may modify the terms at any time, with or without notice; continued use counts as acceptance.",
+      "keywords": ["(modify|change|update|amend|revise).{0,60}(these terms|this agreement|at any time)", "at (our|its) sole discretion.{0,60}(terms|agreement)", "continued use.{0,60}(constitutes|means).{0,30}accept"]
+    },
+    {
+      "id": "auto_renewal",
+      "title": "Automatic renewal & billing",
+      "high_stakes": true,
+      "hint": "Subscription renews automatically, is charged unless cancelled, cancellation deadlines or fees.",
+      "keywords": ["auto[- ]?renew\\w*", "automatically renew\\w*", "renewal term", "recurring (charge|payment|billing)", "until you cancel"]
+    },
+    {
+      "id": "data_sale_sharing",
+      "title": "Sale or sharing of personal data",
+      "high_stakes": true,
+      "hint": "Personal data sold, shared with, or disclosed to third parties, affiliates, partners, or advertisers.",
+      "keywords": ["(sell|sale of|share|disclose|transfer).{0,60}(personal (data|information)|your (data|information))", "third[- ]part(y|ies).{0,60}(data|information)", "advertis\\w+.{0,40}(partner|purpose)"]
+    },
+    {
+      "id": "content_license",
+      "title": "License over your content",
+      "high_stakes": false,
+      "hint": "Rights the company takes over user-submitted content: license scope (perpetual, irrevocable, sublicensable), ownership claims.",
+      "keywords": ["(perpetual|irrevocable|worldwide|royalty[- ]free|sublicens\\w+|transferable).{0,80}licen[sc]e", "licen[sc]e to (use|host|store|reproduce|modify|distribute)", "you (grant|give) (us|.{0,30}company)"]
+    },
+    {
+      "id": "liability_limitation",
+      "title": "Limitation of liability",
+      "high_stakes": false,
+      "hint": "Caps on damages, exclusion of indirect/consequential damages, 'not responsible for' clauses.",
+      "keywords": ["limitation of liability", "not (be )?(liable|responsible) for", "(indirect|incidental|consequential|punitive) damages", "aggregate liability", "maximum liability"]
+    },
+    {
+      "id": "termination",
+      "title": "Account termination & suspension",
+      "high_stakes": false,
+      "hint": "The company may suspend or terminate the account, especially at its discretion or without notice; what happens to data/purchases.",
+      "keywords": ["(terminate|suspend|disable).{0,60}(account|access|services?)", "without (prior )?notice.{0,40}(terminate|suspend)", "for any reason( or no reason)?"]
+    },
+    {
+      "id": "jurisdiction",
+      "title": "Governing law & venue",
+      "high_stakes": false,
+      "hint": "Which country/state law applies and where disputes must be brought.",
+      "keywords": ["governing law", "governed by the laws of", "exclusive jurisdiction", "venue", "courts? (of|located in)"]
+    },
+    {
+      "id": "refunds",
+      "title": "Refunds",
+      "high_stakes": false,
+      "hint": "Refund policy: no-refund clauses, conditions, non-refundable fees.",
+      "keywords": ["non[- ]?refundable", "no refunds?", "refund (policy|eligib\\w+|request)", "money[- ]back"]
+    },
+    {
+      "id": "indemnification",
+      "title": "Indemnification",
+      "high_stakes": false,
+      "hint": "The user must indemnify/defend/hold harmless the company against claims and legal costs.",
+      "keywords": ["indemnif\\w+", "hold (us |.{0,30}company )?harmless", "defend.{0,40}(us|the company)"]
+    },
+    {
+      "id": "tracking",
+      "title": "Tracking & profiling",
+      "high_stakes": false,
+      "hint": "Cookies, analytics, cross-site/device tracking, behavioral profiling, location tracking.",
+      "keywords": ["cookies?", "tracking technolog\\w+", "web beacons?", "device identifiers?", "profil\\w+.{0,40}(behavio|interest)", "location (data|information)"]
+    },
+    {
+      "id": "children",
+      "title": "Children & age limits",
+      "high_stakes": false,
+      "hint": "Minimum age requirements, rules about minors' use and parental consent.",
+      "keywords": ["(under|at least) (the age of )?(13|16|18)", "minors?", "children", "parental consent"]
+    },
+    {
+      "id": "warranty_disclaimer",
+      "title": "Warranty disclaimer",
+      "high_stakes": false,
+      "hint": "Service provided 'as is' / 'as available', disclaimers of merchantability and fitness.",
+      "keywords": ["\"?as[- ]is\"?", "as available", "disclaim\\w+.{0,40}warrant\\w+", "no warrant\\w+", "merchantability", "fitness for a particular purpose"]
+    },
+    {
+      "id": "account_deletion",
+      "title": "Data & account deletion rights",
+      "high_stakes": false,
+      "hint": "User rights to delete the account or personal data; data retention after deletion.",
+      "keywords": ["delete.{0,40}(account|your (data|information))", "right to (erasure|deletion|be forgotten)", "data retention", "retain.{0,40}(data|information).{0,40}after"]
+    }
+  ]
+}

@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "Yoola - AI-Powered Terms of Service Summarizer",
-  "version": "1.0.0",
-  "description": "Simplifies user agreements and terms of service by providing easy-to-understand, AI-generated summaries",
+  "name": "Yoola — ToS Summarizer",
+  "version": "0.2.0",
+  "description": "Detects terms-of-service pages and shows a grounded, checklist-based summary. Alarming clauses first, every claim traceable to the source text.",
   "icons": {
     "16": "images/icon16.png",
     "48": "images/icon48.png",
@@ -10,34 +10,16 @@
   },
   "action": {
     "default_popup": "popup/popup.html",
-    "default_icon": {
-      "16": "images/icon16.png",
-      "48": "images/icon48.png",
-      "128": "images/icon128.png"
-    }
+    "default_icon": { "16": "images/icon16.png", "48": "images/icon48.png" }
   },
-  "permissions": [
-    "activeTab",
-    "storage",
-    "contextMenus",
-    "scripting",
-    "tabs"
-  ],
-  "host_permissions": [
-    "http://127.0.0.1:8000/*",
-    "<all_urls>"
-  ],
-  "background": {
-    "service_worker": "background.js"
-  },
+  "permissions": ["storage", "activeTab"],
+  "host_permissions": ["http://127.0.0.1:8000/*", "https://yoola.example.com/*"],
+  "background": { "service_worker": "background.js" },
   "content_scripts": [
     {
       "matches": ["<all_urls>"],
-      "js": ["content.js"]
+      "js": ["detect.js", "content.js"],
+      "run_at": "document_idle"
     }
-  ],
-  "options_ui": {
-    "page": "options/options.html",
-    "open_in_tab": false
-  }
+  ]
 }
