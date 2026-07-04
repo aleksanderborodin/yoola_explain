@@ -160,3 +160,68 @@ def make_client(tmp_path):
         return TestClient(app)
 
     return build
+
+
+RUSSIAN_TOS = """
+Политика конфиденциальности и пользовательское соглашение
+
+1. Общие положения. Настоящие условия использования регулируют порядок доступа к сервису.
+Используя сервис, вы соглашаетесь с настоящими условиями. Мы оставляем за собой право
+изменять настоящее соглашение в любое время без предварительного уведомления.
+
+2. Персональные данные. Оператор осуществляет обработку персональных данных пользователя,
+включая имя, адрес электронной почты и данные об использовании сервиса. Обработка
+персональных данных осуществляется с согласия пользователя. Персональные данные могут
+передаваться третьим лицам в целях исполнения договора. Конфиденциальность данных
+обеспечивается в соответствии с применимым законодательством.
+
+3. Ответственность. Оператор не несет ответственность за косвенные убытки. Совокупная
+ответственность оператора ограничена суммой, уплаченной пользователем за подписку.
+Возврат средств не производится, за исключением случаев, предусмотренных
+законодательством.
+
+4. Интеллектуальная собственность. Все права на объекты интеллектуальной собственности
+принадлежат оператору. Пользователь получает ограниченную лицензию на использование.
+
+5. Расторжение. Оператор вправе прекратить доступ пользователя к сервису в случае
+нарушения настоящих условий. Разрешение споров осуществляется в соответствии с
+законодательством по месту нахождения оператора. Все споры подлежат рассмотрению в суде.
+""" * 2
+
+
+def make_pdf(lines: list[str]) -> bytes:
+    """Minimal one-page PDF with a real text layer (Helvetica, latin-1 only) —
+    enough for pypdf to extract; keeps the fixture dependency-free."""
+    content = b"BT /F1 10 Tf 40 780 Td 14 TL " + b" ".join(
+        b"(" + line.encode("latin-1").replace(b"(", b"[").replace(b")", b"]") + b") Tj T*"
+        for line in lines
+    ) + b" ET"
+    objects = [
+        b"<< /Type /Catalog /Pages 2 0 R >>",
+        b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+        b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R "
+        b"/Resources << /Font << /F1 5 0 R >> >> >>",
+        b"<< /Length " + str(len(content)).encode() + b" >>\nstream\n" + content + b"\nendstream",
+        b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+    ]
+    out = b"%PDF-1.4\n"
+    offsets = []
+    for i, obj in enumerate(objects, start=1):
+        offsets.append(len(out))
+        out += f"{i} 0 obj\n".encode() + obj + b"\nendobj\n"
+    xref_at = len(out)
+    out += b"xref\n0 " + str(len(objects) + 1).encode() + b"\n0000000000 65535 f \n"
+    for off in offsets:
+        out += f"{off:010d} 00000 n \n".encode()
+    out += (
+        b"trailer\n<< /Size " + str(len(objects) + 1).encode() + b" /Root 1 0 R >>\n"
+        b"startxref\n" + str(xref_at).encode() + b"\n%%EOF"
+    )
+    return out
+
+
+def fetch_returning_pdf(pdf: bytes):
+    async def fetch_fn(url: str, settings: Settings) -> FetchResult:
+        return FetchResult(html="", final_url=url, pdf=pdf)
+
+    return fetch_fn

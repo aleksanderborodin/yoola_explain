@@ -14,8 +14,8 @@ from .config import Settings
 from .urltools import UrlError, assert_public_host, normalize_url
 
 MAX_REDIRECTS = 5
-ACCEPTED_TYPES = ("text/html", "application/xhtml", "text/plain")
-USER_AGENT = "Mozilla/5.0 (compatible; YoolaBot/1.0; +https://yoola.example.com/bot)"
+ACCEPTED_TYPES = ("text/html", "application/xhtml", "text/plain", "application/pdf")
+USER_AGENT = "Mozilla/5.0 (compatible; YoolaBot/1.0; +https://yoola-explain.aleksanderbor.ru)"
 
 
 class FetchError(Exception):
@@ -26,6 +26,7 @@ class FetchError(Exception):
 class FetchResult:
     html: str
     final_url: str
+    pdf: bytes | None = None  # set instead of html when the document is a PDF
 
 
 async def fetch_page(url: str, settings: Settings) -> FetchResult:
@@ -60,6 +61,10 @@ async def fetch_page(url: str, settings: Settings) -> FetchResult:
             content_type = response.headers.get("content-type", "").lower()
             if content_type and not content_type.startswith(ACCEPTED_TYPES):
                 raise FetchError(f"unsupported content type {content_type!r}")
+            if content_type.startswith("application/pdf") or (
+                not content_type and response.content[:5] == b"%PDF-"
+            ):
+                return FetchResult(html="", final_url=current, pdf=response.content)
             return FetchResult(html=response.text, final_url=current)
     raise FetchError("too many redirects")
 

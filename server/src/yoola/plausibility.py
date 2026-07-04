@@ -7,7 +7,11 @@ from dataclasses import dataclass
 
 from .identity import canonicalize
 
+# Multilingual on purpose: the gate must pass legitimate legal pages in the
+# languages we serve, or the client-content fallback 422s on them (the
+# tbank.ru/privacy repro — a Russian privacy policy scored zero density).
 LEGAL_MARKERS = [
+    # en
     "terms of service", "terms of use", "terms and conditions", "privacy policy",
     "user agreement", "these terms", "this agreement", "acceptance of terms",
     "personal data", "personal information", "intellectual property", "liability",
@@ -15,6 +19,23 @@ LEGAL_MARKERS = [
     "termination", "terminate", "third party", "third parties", "consent", "disclaim",
     "license", "licence", "you agree", "we reserve the right", "applicable law",
     "dispute", "refund", "subscription", "confidential",
+    # ru
+    "условия использования", "пользовательское соглашение", "политика конфиденциальности",
+    "настоящие условия", "настоящее соглашение", "персональные данные", "персональных данных",
+    "обработка персональных", "обработку персональных", "конфиденциальность",
+    "ответственность", "интеллектуальная собственность", "интеллектуальной собственности",
+    "вы соглашаетесь", "оставляем за собой право", "применимое законодательство",
+    "законодательств", "расторжение", "согласие", "оферта", "третьим лицам", "третьих лиц",
+    "возврат средств", "подписк", "гарантии", "споры", "разрешение споров", "оператор",
+    # es
+    "términos de servicio", "términos y condiciones", "política de privacidad",
+    "datos personales", "propiedad intelectual", "usted acepta", "responsabilidad",
+    # de
+    "nutzungsbedingungen", "datenschutzerklärung", "personenbezogene daten",
+    "geistiges eigentum", "haftung", "kündigung",
+    # fr
+    "conditions d'utilisation", "conditions générales", "politique de confidentialité",
+    "données personnelles", "propriété intellectuelle", "vous acceptez", "responsabilité",
 ]
 _MARKER_RE = re.compile("|".join(re.escape(m) for m in LEGAL_MARKERS))
 

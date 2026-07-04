@@ -13,7 +13,7 @@ from typing import Awaitable, Callable
 from . import metrics
 from .anchor import locate_quote
 from .config import DISCLAIMER, Settings
-from .extract import extract_main_text
+from .extract import extract_main_text, extract_pdf_text
 from .fetch import FetchError, FetchResult
 from .identity import doc_version as compute_doc_version
 from .identity import simhash64
@@ -104,9 +104,12 @@ async def request_summary(
             metrics.inc("rejected_fetch_budget")
             return Outcome(503, detail="fetch capacity reached for today, try again later")
         fetched = await deps.fetch_fn(url_key, deps.settings)
-        # trafilatura is CPU-bound and synchronous — never run it on the event
-        # loop, or one large page stalls every other request (docs/gotchas.md).
-        text = await asyncio.to_thread(extract_main_text, fetched.html, fetched.final_url)
+        # Extraction is CPU-bound and synchronous — never run it on the event
+        # loop, or one large document stalls every other request (docs/gotchas.md).
+        if fetched.pdf is not None:
+            text = await asyncio.to_thread(extract_pdf_text, fetched.pdf)
+        else:
+            text = await asyncio.to_thread(extract_main_text, fetched.html, fetched.final_url)
         source_verified = True
         final_url = fetched.final_url
         metrics.inc("fetch_ok")

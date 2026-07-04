@@ -8,14 +8,20 @@
 //      page one user added by right-click lights up for everyone else, even
 //      when the heuristic would miss it.
 
-const YOOLA_URL_HINTS = /\/(terms|tos|privacy|eula|legal|conditions|agreement|policy|policies|gdpr|ccpa|cookies?)([/._-]|$)/i;
-const YOOLA_TITLE_HINTS = /(terms|privacy|eula|legal|agreement|conditions|policy|licen[sc]e)/i;
+const YOOLA_URL_HINTS = /\/(terms|tos|privacy|eula|legal|conditions|agreement|policy|policies|gdpr|ccpa|cookies?|pravila|usloviya|soglashenie|oferta)([/._-]|$)/i;
+const YOOLA_TITLE_HINTS = /(terms|privacy|eula|legal|agreement|conditions|policy|licen[sc]e|правил|условия|соглашени|конфиденциальн|оферта|политика)/i;
 
 const YOOLA_MARKERS = [
+  // en
   "terms of service", "terms of use", "terms and conditions", "privacy policy",
   "user agreement", "these terms", "this agreement", "personal data",
   "intellectual property", "liability", "warranty", "indemnif", "arbitrat",
   "governing law", "termination", "you agree", "we reserve the right",
+  // ru (mirrors the server's multilingual plausibility markers)
+  "условия использования", "пользовательское соглашение", "политика конфиденциальности",
+  "настоящие условия", "персональные данные", "персональных данных", "конфиденциальность",
+  "ответственность", "интеллектуальной собственности", "вы соглашаетесь",
+  "оставляем за собой право", "расторжение", "оферта", "третьим лицам",
 ];
 
 const YOOLA_TRACKING = /^(utm_|gclid$|fbclid$|msclkid$|ref$|mc_cid$|mc_eid$|igshid$)/i;
