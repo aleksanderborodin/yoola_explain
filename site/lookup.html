@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Yoola directory — graded terms of service</title>
+  <meta name="description" content="Browse the shared directory of graded terms of service and privacy policies. One reading, cached for everyone." />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="wrap">
+    <header class="site-hd">
+      <a class="mark" href="index.html">Yoola</a>
+      <nav class="nav">
+        <a href="lookup.html" class="active">Directory</a>
+        <a href="https://github.com/aleksanderborodin/yoola_explain">GitHub</a>
+      </nav>
+    </header>
+
+    <section class="block" style="border-top:none">
+      <h2>The directory</h2>
+      <p class="block-lede">
+        Every document summarized through Yoola is analyzed once and cached for everyone.
+        Search by site to see its verdict before you sign up. For the full clause-by-clause
+        view with quotes, open the page with the extension.
+      </p>
+      <input class="search" id="dir-search" type="search"
+             placeholder="Search a site — e.g. mozilla.org" autocomplete="off" />
+      <div class="dir-grid" id="dir-grid"></div>
+      <p class="dir-note" id="dir-note"></p>
+    </section>
+
+    <footer class="site-ft">
+      <span>Yoola is open source — <a href="https://github.com/aleksanderborodin/yoola_explain">github.com/aleksanderborodin/yoola_explain</a></span>
+      <span>AI-generated summaries. Not legal advice. Verify against the original.</span>
+    </footer>
+  </div>
+
+  <script src="site.js"></script>
+  <script>initLookup();</script>
+</body>
+</html>

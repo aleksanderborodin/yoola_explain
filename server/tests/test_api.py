@@ -329,6 +329,20 @@ def test_client_fallback_not_in_registry(make_client):
     with make_client(provider, fetch_failing) as client:
         assert post(client, content=SAMPLE_TOS).json()["source_verified"] is False
         assert client.get("/v1/registry").json()["urls"] == []
+        assert client.get("/v1/directory").json()["entries"] == []
+
+
+def test_directory_lists_verified_summaries(make_client):
+    provider = FakeProvider()
+    with make_client(provider, fetch_returning(html_page(SAMPLE_TOS))) as client:
+        post(client)
+        entries = client.get("/v1/directory").json()["entries"]
+        assert len(entries) == 1
+        entry = entries[0]
+        assert entry["url"] == URL
+        assert entry["grade"] in "ABCDE"
+        assert entry["alerts"] >= 1
+        assert entry["tldr"]
 
 
 # ------------------------------------------------------------ LLM legal-check gate

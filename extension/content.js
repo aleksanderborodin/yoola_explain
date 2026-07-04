@@ -10,14 +10,15 @@
   const VERDICT = { A: "Fair terms", B: "Mostly fair", C: "Mixed terms", D: "Harsh terms", E: "Very harsh" };
   let shadow = null;
 
-  yoolaDetect().then((kind) => {
-    if (!kind) return;
+  yoolaDetect().then((hit) => {
+    if (!hit) return;
     chrome.runtime.sendMessage({ type: "detected" });
-    mountTab(kind);
+    mountTab(hit.kind, hit.links);
   });
 
   chrome.runtime.onMessage.addListener((msg) => {
     if (msg.type === "summarize-current") summarize();
+    if (msg.type === "summarize-url") summarize({ url: msg.url, remote: true });
   });
 
   function ui() {
@@ -32,22 +33,28 @@
     return shadow;
   }
 
-  function mountTab(kind) {
+  const TAB_MSG = {
+    heuristic: "Terms detected",
+    registry: "Summary available",
+    links: "Check the terms first?",
+  };
+
+  function mountTab(kind, links) {
     const root = ui();
     root.querySelector(".tab")?.remove();
     const tab = document.createElement("button");
     tab.className = "tab";
-    tab.innerHTML = `<span class="mark">Yoola</span><span class="tab-msg">${
-      kind === "registry" ? "Summary available" : "Terms detected"
-    }</span>`;
+    tab.innerHTML = `<span class="mark">Yoola</span><span class="tab-msg">${TAB_MSG[kind]}</span>`;
     tab.addEventListener("click", () => {
       tab.remove();
-      summarize();
+      if (kind === "links" && links.length > 1) showPicker(links);
+      else if (kind === "links") summarize({ url: links[0].url, label: links[0].label, remote: true });
+      else summarize();
     });
     root.appendChild(tab);
   }
 
-  async function summarize() {
+  function openPanel() {
     const root = ui();
     root.querySelector(".panel")?.remove();
     const panel = document.createElement("div");
@@ -57,18 +64,49 @@
         <span class="mark">Yoola</span>
         <button class="x" title="Close" aria-label="Close">✕</button>
       </header>
-      <div class="bd"><div class="loading"><span class="spin"></span>Reading the fine print…</div></div>`;
+      <div class="bd"></div>`;
     panel.querySelector(".x").addEventListener("click", () => panel.remove());
     root.appendChild(panel);
-    const body = panel.querySelector(".bd");
+    return panel.querySelector(".bd");
+  }
+
+  // The consent-page chooser: this page links to several legal documents;
+  // summarize any of them without leaving the page.
+  function showPicker(links) {
+    const body = openPanel();
+    body.innerHTML = `
+      <h2>Before you agree</h2>
+      <p class="pick-intro">This page asks you to accept legal documents. Pick one to review — you won't leave this page.</p>
+      <div class="picks"></div>`;
+    const box = body.querySelector(".picks");
+    for (const link of links) {
+      const button = document.createElement("button");
+      button.className = "pick";
+      const host = new URL(link.url).hostname;
+      button.innerHTML = `<span class="pick-label">${escapeHtml(link.label)}</span><span class="pick-host">${escapeHtml(host)}</span>`;
+      button.addEventListener("click", () => summarize({ url: link.url, label: link.label, remote: true }));
+      box.appendChild(button);
+    }
+  }
+
+  // target: {url, label?, remote?} — defaults to the page you're on. `remote`
+  // means we're summarizing a LINKED document (v4 A5/link-mode): quotes deep-link
+  // to the source instead of highlighting in this page.
+  async function summarize(target = { url: location.href, remote: false }) {
+    const body = openPanel();
+    body.innerHTML = `<div class="loading"><span class="spin"></span>Reading the fine print…</div>`;
 
     const language = (navigator.language || "en").split("-")[0];
-    let reply = await chrome.runtime.sendMessage({ type: "summarize", url: location.href, language });
+    let reply = await chrome.runtime.sendMessage({ type: "summarize", url: target.url, language });
     if (reply?.needClientContent) {
+      if (target.remote) {
+        body.innerHTML = `<div class="notice err">That site blocks our reader. Open the document and use Yoola there.</div>`;
+        return;
+      }
       body.innerHTML = `<div class="loading"><span class="spin"></span>Site blocks our reader — sending the page text…</div>`;
       reply = await chrome.runtime.sendMessage({
         type: "summarize",
-        url: location.href,
+        url: target.url,
         language,
         clientContent: yoolaExtractText(),
       });
@@ -77,18 +115,22 @@
       body.innerHTML = `<div class="notice err">${escapeHtml(reply?.detail || "Something went wrong.")}</div>`;
       return;
     }
-    render(body, reply.payload, reply.fromL1);
+    render(body, reply.payload, reply.fromL1, target);
   }
 
-  function render(body, s, fromL1) {
+  function render(body, s, fromL1, target) {
     const present = s.categories
       .filter((c) => c.status === "present")
       .sort((a, b) => SEVERITY_ORDER[a.severity] - SEVERITY_ORDER[b.severity]);
     const alerts = present.filter((c) => c.severity !== "low");
     const standard = present.filter((c) => c.severity === "low");
     const notAddressed = s.categories.filter((c) => c.status === "not_addressed");
+    const docLine = target?.remote
+      ? `<div class="doc-line">${escapeHtml(target.label || "Linked document")} · ${escapeHtml(new URL(s.url || target.url).hostname)}</div>`
+      : "";
 
     body.innerHTML = `
+      ${docLine}
       ${s.disputed ? `<div class="notice flag">Readers flagged this summary. Weigh it carefully and check the source.</div>` : ""}
       <section class="verdict">
         <div class="stamp g-${s.grade}"><span>${s.grade}</span></div>
@@ -109,16 +151,17 @@
         ${escapeHtml(s.disclaimer)}
       </footer>`;
 
+    const ctx = { docVersion: s.doc_version, remote: !!target?.remote, url: s.url || target?.url };
     const alertsBox = body.querySelector(".alerts");
     if (!alerts.length) {
       alertsBox.innerHTML = `<div class="clear">No high-risk clauses stood out. The routine terms are below.</div>`;
     } else {
       alertsBox.innerHTML = `<h2>Watch out for</h2>`;
-      for (const c of alerts) alertsBox.appendChild(card(c, s.doc_version));
+      for (const c of alerts) alertsBox.appendChild(card(c, ctx));
     }
 
     const moreBody = body.querySelector(".more-body");
-    for (const c of standard) moreBody.appendChild(card(c, s.doc_version, true));
+    for (const c of standard) moreBody.appendChild(card(c, ctx, true));
     if (notAddressed.length) {
       const na = document.createElement("p");
       na.className = "na";
@@ -127,7 +170,7 @@
     }
   }
 
-  function card(c, docVersion, quiet = false) {
+  function card(c, ctx, quiet = false) {
     const el = document.createElement("article");
     el.className = `card sev-${c.severity}${quiet ? " quiet" : ""}`;
     el.innerHTML = `
@@ -148,8 +191,15 @@
       text.textContent = `“${q.text}”`;
       const jump = document.createElement("button");
       jump.className = "jump";
-      jump.textContent = "find in page ↗";
-      jump.addEventListener("click", () => highlight(q.text));
+      if (ctx.remote) {
+        // Summarizing a linked document: deep-link into the source with a
+        // text fragment so the browser highlights the clause on arrival.
+        jump.textContent = "read at source ↗";
+        jump.addEventListener("click", () => window.open(textFragmentUrl(ctx.url, q.text), "_blank"));
+      } else {
+        jump.textContent = "find in page ↗";
+        jump.addEventListener("click", () => highlight(q.text));
+      }
       wrap.append(text, jump);
       quotes.appendChild(wrap);
     }
@@ -160,10 +210,15 @@
     report.addEventListener("click", async () => {
       report.disabled = true;
       report.textContent = "Thanks — reported";
-      await chrome.runtime.sendMessage({ type: "report", docVersion, category: c.id });
+      await chrome.runtime.sendMessage({ type: "report", docVersion: ctx.docVersion, category: c.id });
     });
     el.querySelector(".card-ft").appendChild(report);
     return el;
+  }
+
+  function textFragmentUrl(url, quote) {
+    const words = quote.replace(/\s+/g, " ").trim().split(" ").slice(0, 8).join(" ");
+    return `${url}#:~:text=${encodeURIComponent(words)}`;
   }
 
   function sourceLabel(s, fromL1) {
@@ -246,6 +301,16 @@
     .loading { color: var(--fg2); display: flex; align-items: center; gap: 10px; padding: 24px 4px; }
     .spin { width: 15px; height: 15px; border: 2px solid var(--line); border-top-color: var(--brass);
       border-radius: 50%; animation: yoola-spin .8s linear infinite; }
+    .doc-line { color: var(--fg2); font-size: 12px; padding: 2px 2px 10px;
+      border-bottom: 1px solid var(--line); margin-bottom: 12px; }
+    .pick-intro { color: var(--fg2); font-size: 13px; margin: 6px 0 12px; }
+    .pick { display: flex; flex-direction: column; align-items: flex-start; gap: 2px;
+      width: 100%; text-align: left; background: var(--raised); border: 1px solid var(--line);
+      border-left: 3px solid var(--brass); border-radius: 10px; padding: 11px 13px;
+      margin: 8px 0; cursor: pointer; color: var(--fg); }
+    .pick:hover { background: #232834; }
+    .pick-label { font-weight: 600; font-size: 13.5px; }
+    .pick-host { color: var(--fg3); font-size: 11.5px; }
     .notice { border-radius: 10px; padding: 11px 13px; font-size: 13px; margin-bottom: 4px; }
     .notice.err { background: rgba(229,101,75,.12); color: #F0A594; border: 1px solid rgba(229,101,75,.3); }
     .notice.flag { background: rgba(224,167,60,.1); color: #ECC578; border: 1px solid rgba(224,167,60,.28); margin-bottom: 14px; }

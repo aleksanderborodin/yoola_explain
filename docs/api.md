@@ -76,6 +76,16 @@ reporters the summary is marked **disputed** — still served, with
 `disputed: true`, and queued for review. A report never removes a summary or
 forces a paid regeneration (see Design v4 A2).
 
+## GET /v1/directory?limit=…
+
+Public browse list for the website (`site/lookup.html`): one row per
+server-verified, non-disputed URL.
+
+```json
+{ "entries": [ { "url": "https://…", "grade": "C", "alerts": 6,
+                 "tldr": ["…", "…", "…"], "generated_at": "…" } ] }
+```
+
 ## GET /v1/registry
 
 Compact detection digest so the extension can light up on pages the local

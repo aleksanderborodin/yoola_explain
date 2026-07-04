@@ -10,7 +10,15 @@ chrome.runtime.onInstalled.addListener(() => {
   chrome.contextMenus.create({
     id: "yoola-summarize",
     title: "Summarize this page with Yoola",
-    contexts: ["page", "selection", "link", "action"],
+    contexts: ["page", "selection", "action"],
+  });
+  // Right-click a "Terms"/"Privacy" link on a signup page: summarize the LINKED
+  // document without navigating to it (the server fetches by URL, so being on
+  // the page is never required).
+  chrome.contextMenus.create({
+    id: "yoola-summarize-link",
+    title: "Summarize linked document with Yoola",
+    contexts: ["link"],
   });
   chrome.alarms.create("yoola-registry", { periodInMinutes: REGISTRY_SYNC_HOURS * 60 });
   syncRegistry();
@@ -19,8 +27,11 @@ chrome.runtime.onStartup.addListener(syncRegistry);
 chrome.alarms.onAlarm.addListener((a) => a.name === "yoola-registry" && syncRegistry());
 
 chrome.contextMenus.onClicked.addListener((info, tab) => {
-  if (info.menuItemId === "yoola-summarize" && tab?.id != null) {
+  if (tab?.id == null) return;
+  if (info.menuItemId === "yoola-summarize") {
     chrome.tabs.sendMessage(tab.id, { type: "summarize-current" });
+  } else if (info.menuItemId === "yoola-summarize-link" && info.linkUrl) {
+    chrome.tabs.sendMessage(tab.id, { type: "summarize-url", url: info.linkUrl });
   }
 });
 

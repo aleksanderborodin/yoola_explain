@@ -70,10 +70,46 @@ async function yoolaInRegistry(href) {
   return new Set(registry.urls).has(hex.slice(0, registry.hash_len));
 }
 
-// Returns "heuristic" | "registry" | null — null means keep the icon dim.
+// Consent-moment detection: a page that ASKS you to accept terms (signup/checkout)
+// rather than being the terms. If it links to legal documents, Yoola can
+// summarize the LINKED docs in place — the user never has to navigate away
+// (the server fetches by URL, so being on the page is never required).
+const YOOLA_LINK_TEXT = /(terms|conditions|privacy|policy|eula|licen[sc]e|agreement|правил|условия|конфиденциальн)/i;
+
+function yoolaConsentContext() {
+  if (document.querySelector('input[type="password"]')) return true;
+  const checkboxes = document.querySelectorAll('input[type="checkbox"]');
+  for (const box of checkboxes) {
+    const label = (box.closest("label") ?? box.parentElement)?.textContent ?? "";
+    if (/(agree|accept|consent)/i.test(label) && YOOLA_LINK_TEXT.test(label)) return true;
+  }
+  return false;
+}
+
+function yoolaFindLegalLinks() {
+  const found = new Map(); // normalized url -> label
+  for (const a of document.querySelectorAll("a[href]")) {
+    const text = (a.textContent ?? "").trim();
+    if (!text || text.length > 90) continue;
+    const textHit = YOOLA_LINK_TEXT.test(text);
+    const hrefHit = YOOLA_URL_HINTS.test(a.pathname ?? "");
+    if (!textHit && !hrefHit) continue;
+    const url = yoolaNormalizeUrl(a.href);
+    if (!url || url === yoolaNormalizeUrl(location.href)) continue;
+    if (!found.has(url)) found.set(url, textHit ? text : a.pathname);
+    if (found.size >= 4) break;
+  }
+  return [...found].map(([url, label]) => ({ url, label }));
+}
+
+// Returns {kind: "heuristic" | "registry" | "links", links} or null (icon stays dim).
 async function yoolaDetect() {
-  if (yoolaCheapGate() && yoolaDensityScan()) return "heuristic";
-  if (await yoolaInRegistry(location.href)) return "registry";
+  if (yoolaCheapGate() && yoolaDensityScan()) return { kind: "heuristic", links: [] };
+  if (await yoolaInRegistry(location.href)) return { kind: "registry", links: [] };
+  if (yoolaConsentContext()) {
+    const links = yoolaFindLegalLinks();
+    if (links.length) return { kind: "links", links };
+  }
   return null;
 }
 

@@ -51,6 +51,14 @@ Read this file first, then follow the path for your task. Skim
   keywords, high_stakes) → keyword regexes feed the omission cross-check, so
   keep them high-precision → update `docs/architecture.md` category count and
   the tests in `server/tests/test_taxonomy.py`.
+- **Touch the website** → `site/` (static, GitHub Pages via
+  `.github/workflows/pages.yml`; `site.js` holds the demo data + `YOOLA_API`
+  hook to the `/v1/directory` endpoint). Same graphite+brass identity as the
+  extension panel — keep them visually in sync.
+- **User-facing docs / legal** → `docs/user-guide.md` (install, triggers, panel
+  reading, the "Yoola explains Yoola" dogfood section) and
+  `docs/legal/terms-of-service.md` (our own deliberately lawyer-grade ToS —
+  also the dogfood input; regenerate the user-guide summary if you change it).
 - **Deploy / hosting** → `server.md` (gitignored: SSH creds + box inventory) →
   `docs/roadmap.md` "Deploy" for the plan.
 - **Understand scope / what's deliberately NOT built** → `Yoola_Design_v4.md`
@@ -71,9 +79,9 @@ Read this file first, then follow the path for your task. Skim
 **`server/src/yoola/` — the backend** (one module per responsibility):
 
 - `app.py` — FastAPI factory (`create_app(settings, provider, fetch_fn)` —
-  everything injectable for tests), the 4 routes (`GET`/`POST /v1/summary`,
-  `POST /v1/report`, `GET /v1/registry`) + `/healthz` + `/metrics`. CORS from
-  settings; client IP via `clientip`.
+  everything injectable for tests), the 5 routes (`GET`/`POST /v1/summary`,
+  `POST /v1/report`, `GET /v1/registry`, `GET /v1/directory`) + `/healthz` +
+  `/metrics`. CORS from settings; client IP via `clientip`.
 - `clientip.py` — real client IP behind a trusted proxy (`X-Forwarded-For`) +
   salted reporter-hash for dedup. See gotcha #10.
 - `pipeline.py` — **the heart**: `read_cached` (GET, pure read) and

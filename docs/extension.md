@@ -7,13 +7,18 @@ file that touches the network.
 ## Triggers (three ways in)
 
 1. **Detection tab** — appears bottom-right when the page is detected (see below).
+   On a consent page it reads *Check the terms first?* and summarizes the
+   **linked** documents in place (a picker appears when there are several).
 2. **Popup button** — "Summarize this page", for anything.
-3. **Right-click → "Summarize this page with Yoola"** — the context menu, for
-   pages detection misses. All three call the same flow.
+3. **Right-click** — *Summarize this page with Yoola* on the page, or
+   *Summarize linked document with Yoola* on a Terms/Privacy **link** — the
+   linked doc is summarized without navigating (the server fetches by URL, so
+   being on the page is never required).
 
-## Detection (three signals, cheapest first, none phones home per page)
+## Detection (four signals, cheapest first, none phones home per page)
 
-`detect.js#yoolaDetect()` returns `"heuristic"`, `"registry"`, or `null`:
+`detect.js#yoolaDetect()` returns `{kind, links}` with kind
+`"heuristic" | "registry" | "links"`, or `null`:
 1. cheap local gate (URL path / title regex);
 2. marker-density scan (only if #1 passes);
 3. **registry membership** — the extension normalizes the current URL, hashes
@@ -22,6 +27,12 @@ file that touches the network.
    page one user added via right-click lights up ("Summary available") for
    everyone else even when the heuristic would miss it — with no per-visit
    network call, so the "no browsing history" line holds.
+4. **consent context** (`kind: "links"`) — a signup/checkout moment (password
+   field, or an "I agree…" checkbox naming terms) that links to legal documents
+   (`yoolaFindLegalLinks`, ≤4). This closes the registration-page gap: the user
+   reviews the terms without leaving the form. In this remote mode, quote
+   buttons become *read at source ↗* and deep-link into the original via a
+   `#:~:text=` fragment instead of highlighting the current page.
 
 ## Files
 
@@ -49,7 +60,8 @@ file that touches the network.
 | `detected` | content → bg | — | sets tab badge |
 | `summarize` | content → bg | `{url, language, clientContent?}` | `{ok, payload, fromL1?}` \| `{ok:false, needClientContent:true}` \| `{ok:false, detail}` |
 | `report` | content → bg | `{docVersion, category}` | `{ok}` |
-| `summarize-current` | popup/bg/context-menu → content | — | triggers the panel |
+| `summarize-current` | popup/bg/context-menu → content | — | panel for the current page |
+| `summarize-url` | bg (link context-menu) → content | `{url}` | panel for the linked document (remote mode) |
 
 ## L1 cache
 

@@ -110,6 +110,37 @@ class Store:
                 "UPDATE urls SET last_checked = ? WHERE url_key = ?", (_now(), url_key)
             )
 
+    def list_directory(self, limit: int = 200) -> list[dict]:
+        """Public directory rows for the website: verified, non-disputed summaries."""
+        with self._lock:
+            rows = self._conn.execute(
+                """SELECT u.url_key, s.summary_json, s.generated_at
+                   FROM urls u
+                   JOIN doc_versions d ON d.doc_version = u.doc_version
+                   JOIN summaries s ON s.doc_version = u.doc_version
+                   WHERE d.source_verified = 1 AND s.disputed = 0
+                   ORDER BY s.generated_at DESC LIMIT ?""",
+                (limit,),
+            ).fetchall()
+        out = []
+        for row in rows:
+            doc = json.loads(row["summary_json"])
+            alerts = sum(
+                1
+                for c in doc.get("categories", [])
+                if c.get("status") == "present" and c.get("severity") in ("high", "medium")
+            )
+            out.append(
+                {
+                    "url": row["url_key"],
+                    "grade": doc.get("grade"),
+                    "alerts": alerts,
+                    "tldr": doc.get("tldr", [])[:3],
+                    "generated_at": row["generated_at"],
+                }
+            )
+        return out
+
     def known_url_keys(self) -> list[str]:
         """Every URL with a live, server-verified summary — the detection registry
         the extension checks locally so manually-added pages surface for everyone."""
