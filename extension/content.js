@@ -94,7 +94,8 @@
   // to the source instead of highlighting in this page.
   async function summarize(target = { url: location.href, remote: false }) {
     const body = openPanel();
-    body.innerHTML = `<div class="loading"><span class="spin"></span>Reading the fine print…</div>`;
+    body.innerHTML = `<div class="loading"><span class="spin"></span>
+      <span>Reading the fine print…<br><small>First analysis of a new document takes about a minute; cached ones are instant.</small></span></div>`;
 
     const language = (navigator.language || "en").split("-")[0];
     let reply = await chrome.runtime.sendMessage({ type: "summarize", url: target.url, language });
@@ -298,7 +299,8 @@
     .bd::-webkit-scrollbar { width: 8px; }
     .bd::-webkit-scrollbar-thumb { background: var(--line); border-radius: 8px; }
 
-    .loading { color: var(--fg2); display: flex; align-items: center; gap: 10px; padding: 24px 4px; }
+    .loading { color: var(--fg2); display: flex; align-items: flex-start; gap: 10px; padding: 24px 4px; }
+    .loading small { color: var(--fg3); font-size: 11.5px; line-height: 1.4; display: inline-block; margin-top: 4px; }
     .spin { width: 15px; height: 15px; border: 2px solid var(--line); border-top-color: var(--brass);
       border-radius: 50%; animation: yoola-spin .8s linear infinite; }
     .doc-line { color: var(--fg2); font-size: 12px; padding: 2px 2px 10px;

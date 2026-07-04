@@ -62,8 +62,11 @@ async function summarize({ url, language, clientContent }) {
   }
 
   try {
+    // Timeouts matter: a connection dropped mid-path (e.g. DPI, gotcha #14)
+    // otherwise hangs the panel on "Summarizing…" forever.
     const got = await fetch(
-      `${API_BASE}/v1/summary?url=${encodeURIComponent(url)}&lang=${encodeURIComponent(language)}`
+      `${API_BASE}/v1/summary?url=${encodeURIComponent(url)}&lang=${encodeURIComponent(language)}`,
+      { signal: AbortSignal.timeout(20000) }
     );
     if (got.ok) {
       const payload = await got.json();
@@ -79,6 +82,7 @@ async function summarize({ url, language, clientContent }) {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
+      signal: AbortSignal.timeout(300000), // a first analysis legitimately takes 1-2 min
     });
 
     if (response.status === 200) {
@@ -110,6 +114,7 @@ async function report({ docVersion, category }) {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ doc_version: docVersion, category }),
+      signal: AbortSignal.timeout(15000),
     });
     return { ok: true };
   } catch {
@@ -119,7 +124,9 @@ async function report({ docVersion, category }) {
 
 async function syncRegistry() {
   try {
-    const response = await fetch(`${API_BASE}/v1/registry`);
+    const response = await fetch(`${API_BASE}/v1/registry`, {
+      signal: AbortSignal.timeout(15000),
+    });
     if (!response.ok) return;
     const data = await response.json();
     await chrome.storage.local.set({ registry: { hash_len: data.hash_len, urls: data.urls } });
