@@ -65,3 +65,6 @@ Fix one → delete it here. Discover one → add it, same session.
     `curl -k --resolve fake.test:443:<ip> https://fake.test/healthz` (works) vs
     the real hostname (hangs). Remedy if it affects real users: front the domain
     with a proxy whose IPs the DPI passes (e.g. Cloudflare), or ECH when mature.
+    Postscript: moving the server to a new IP (2026-07-04) made the same SNI pass
+    on the affected ISP — the filter matched hostname + IP range, so a host move
+    or fronting both work; the diagnosis method above stands.
