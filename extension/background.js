@@ -74,6 +74,35 @@ async function handle(msg, sender) {
       return { ok: false }; // genuinely uninjectable page (PDF viewer, chrome://)
     }
   }
+  if (msg.type === "popup-open-url") {
+    try {
+      await sendToContent(msg.tabId, { type: "summarize-url", url: msg.url, label: msg.label });
+      return { ok: true };
+    } catch {
+      return { ok: false };
+    }
+  }
+  if (msg.type === "site-agreements") {
+    // What Yoola already knows about this host — instant, graded.
+    try {
+      const response = await fetch(
+        `${API_BASE}/v1/directory?host=${encodeURIComponent(msg.host)}`,
+        { signal: AbortSignal.timeout(8000) }
+      );
+      if (response.ok) return { entries: (await response.json()).entries };
+    } catch {
+      /* offline / blocked — the page-links half still renders */
+    }
+    return { entries: [] };
+  }
+  if (msg.type === "page-links") {
+    // Legal links visible on the current page (footer Terms/Privacy etc.).
+    try {
+      return await sendToContent(msg.tabId, { type: "get-legal-links" });
+    } catch {
+      return { links: [] };
+    }
+  }
   return { ok: false, detail: "unknown message" };
 }
 

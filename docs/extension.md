@@ -9,7 +9,11 @@ file that touches the network.
 1. **Detection tab** — appears bottom-right when the page is detected (see below).
    On a consent page it reads *Check the terms first?* and summarizes the
    **linked** documents in place (a picker appears when there are several).
-2. **Popup button** — "Summarize this page", for anything.
+2. **Popup — the site dossier.** Clicking the icon lists ALL agreements for
+   the current site: documents Yoola has already graded for this host (via
+   `GET /v1/directory?host=`, instant, with grade stamps) merged with legal
+   links found on the current page ("not analyzed yet" candidates). Any row
+   opens the panel in-page; "Summarize this page instead" covers the rest.
 3. **Right-click** — *Summarize this page with Yoola* on the page, or
    *Summarize linked document with Yoola* on a Terms/Privacy **link** — the
    linked doc is summarized without navigating (the server fetches by URL, so
@@ -51,7 +55,7 @@ file that touches the network.
   `POST /v1/summary` (→ on 502, asks content for `clientContent` and retries).
   Owns the L1 LRU cache, the badge, the right-click menu, and `syncRegistry()`.
   `API_BASE` constant at the top (dev: `127.0.0.1:8000`).
-- `popup/` — manual "Summarize this page", dossier-styled.
+- `popup/` — the site dossier (see Triggers #2), dossier-styled.
 
 ## Message contract (content ⇄ background)
 
@@ -61,7 +65,11 @@ file that touches the network.
 | `summarize` | content → bg | `{url, language, clientContent?}` | `{ok, payload, fromL1?}` \| `{ok:false, needClientContent:true}` \| `{ok:false, detail}` |
 | `report` | content → bg | `{docVersion, category}` | `{ok}` |
 | `summarize-current` | bg → content (via `sendToContent`) | — | panel for the current page |
-| `summarize-url` | bg (link context-menu) → content (via `sendToContent`) | `{url}` | panel for the linked document (remote mode) |
+| `summarize-url` | bg → content (via `sendToContent`) | `{url, label?}` | panel for the linked document; local mode auto-detected when the URL is the current page |
+| `popup-open-url` | popup → bg | `{tabId, url, label}` | bg delivers `summarize-url` (injecting if needed) |
+| `site-agreements` | popup → bg | `{host}` | `{entries}` from `GET /v1/directory?host=` |
+| `page-links` | popup → bg | `{tabId}` | `{links}` via content `get-legal-links` |
+| `get-legal-links` | bg → content | — | `{links}` from `yoolaFindLegalLinks()` |
 | `popup-summarize` | popup → bg | `{tabId}` | `{ok}` — bg delivers `summarize-current`, injecting the content script first if the tab predates the last extension reload (`scripting` permission); `ok:false` only on genuinely uninjectable pages |
 
 ## L1 cache

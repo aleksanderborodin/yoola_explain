@@ -397,3 +397,21 @@ def test_metrics_expose_hit_rate(make_client):
         text = client.get("/metrics").text
         assert "yoola_generated 1" in text
         assert "yoola_cache_hit_post 1" in text
+
+
+def test_directory_host_filter_is_www_insensitive(make_client):
+    provider = FakeProvider()
+    pages = {
+        "https://www.a-corp.com/terms": html_page(SAMPLE_TOS),
+        "https://b-corp.com/terms": html_page(OTHER_TOS),
+    }
+    with make_client(provider, fetch_by_url(pages)) as client:
+        post(client, "https://www.a-corp.com/terms")
+        post(client, "https://b-corp.com/terms")
+        both = client.get("/v1/directory").json()["entries"]
+        assert len(both) == 2
+        only_a = client.get("/v1/directory", params={"host": "a-corp.com"}).json()["entries"]
+        assert [e["url"] for e in only_a] == ["https://www.a-corp.com/terms"]
+        via_www = client.get("/v1/directory", params={"host": "www.b-corp.com"}).json()["entries"]
+        assert [e["url"] for e in via_www] == ["https://b-corp.com/terms"]
+        assert client.get("/v1/directory", params={"host": "c.com"}).json()["entries"] == []

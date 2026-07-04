@@ -76,10 +76,11 @@ reporters the summary is marked **disputed** — still served, with
 `disputed: true`, and queued for review. A report never removes a summary or
 forces a paid regeneration (see Design v4 A2).
 
-## GET /v1/directory?limit=…
+## GET /v1/directory?limit=…&host=…
 
 Public browse list for the website (the site home page): one row per
-server-verified, non-disputed URL.
+server-verified, non-disputed URL. With `host=` (www-insensitive), only that
+site's documents — the extension popup's "agreements on this site" source.
 
 ```json
 { "entries": [ { "url": "https://…", "grade": "C", "alerts": 6,

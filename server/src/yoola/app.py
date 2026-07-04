@@ -106,9 +106,10 @@ def create_app(
         return Response(status_code=204)
 
     @app.get("/v1/directory")
-    def directory(request: Request, limit: int = 100):
-        """Public browse list for the website: grade + alert count per known URL."""
-        return {"entries": request.app.state.deps.store.list_directory(min(limit, 500))}
+    def directory(request: Request, limit: int = 100, host: str | None = None):
+        """Public browse list (website) — with ?host=, the extension popup's
+        'agreements on this site' lookup."""
+        return {"entries": request.app.state.deps.store.list_directory(min(limit, 500), host)}
 
     @app.get("/v1/registry")
     def registry(request: Request):

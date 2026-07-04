@@ -16,9 +16,17 @@
     mountTab(hit.kind, hit.links);
   });
 
-  chrome.runtime.onMessage.addListener((msg) => {
+  chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     if (msg.type === "summarize-current") summarize();
-    if (msg.type === "summarize-url") summarize({ url: msg.url, remote: true });
+    if (msg.type === "summarize-url") {
+      // Local when the target IS this page (e.g. picked from the popup list
+      // while standing on it) — keeps in-page quote highlighting.
+      const remote = yoolaNormalizeUrl(msg.url) !== yoolaNormalizeUrl(location.href);
+      summarize({ url: msg.url, label: msg.label, remote });
+    }
+    if (msg.type === "get-legal-links") {
+      sendResponse({ links: yoolaFindLegalLinks() });
+    }
   });
 
   function ui() {

@@ -6,6 +6,7 @@ import json
 import sqlite3
 import threading
 from datetime import datetime, timedelta, timezone
+from urllib.parse import urlsplit
 
 from .identity import hamming
 from .schema import SummaryDoc
@@ -110,8 +111,10 @@ class Store:
                 "UPDATE urls SET last_checked = ? WHERE url_key = ?", (_now(), url_key)
             )
 
-    def list_directory(self, limit: int = 200) -> list[dict]:
-        """Public directory rows for the website: verified, non-disputed summaries."""
+    def list_directory(self, limit: int = 200, host: str | None = None) -> list[dict]:
+        """Public directory rows: verified, non-disputed summaries; optionally
+        only those on `host` (www-insensitive — powers the extension popup's
+        'agreements on this site' list)."""
         with self._lock:
             rows = self._conn.execute(
                 """SELECT u.url_key, s.summary_json, s.generated_at
@@ -122,8 +125,13 @@ class Store:
                    ORDER BY s.generated_at DESC LIMIT ?""",
                 (limit,),
             ).fetchall()
+        wanted = host.lower().removeprefix("www.") if host else None
         out = []
         for row in rows:
+            if wanted is not None:
+                entry_host = (urlsplit(row["url_key"]).hostname or "").removeprefix("www.")
+                if entry_host != wanted:
+                    continue
             doc = json.loads(row["summary_json"])
             alerts = sum(
                 1
