@@ -1,6 +1,8 @@
 // Yoola service worker: the ONLY thing that talks to the server (Design v4 §5).
 // Owns the L1 cache, the badge, the right-click menu, and the registry sync.
 
+importScripts("detect.js"); // for yoolaNormalizeUrl — one normalization everywhere
+
 const API_BASE = "https://yoola-explain.aleksanderbor.ru"; // dev: "http://127.0.0.1:8000"
 const L1_MAX_ENTRIES = 50;
 const L1_REFRESH_DAYS = 7;
@@ -89,17 +91,16 @@ async function handle(msg, sender) {
   }
   if (msg.type === "extract-remote") return extractViaTab(msg.url);
   if (msg.type === "site-agreements") {
-    // What Yoola already knows about this host — instant, graded.
-    try {
-      const response = await fetch(
-        `${API_BASE}/v1/directory?host=${encodeURIComponent(msg.host)}`,
-        { signal: AbortSignal.timeout(8000) }
-      );
-      if (response.ok) return { entries: (await response.json()).entries };
-    } catch {
-      /* offline / blocked — the page-links half still renders */
+    // What Yoola already knows about this host — instant, graded. The server
+    // matches the host and its subdomains; when the user stands on a deep
+    // subdomain (app.foo.example.com) with no entries, retry from the site's
+    // base domain so terms living on example.com still show up.
+    let entries = await fetchDirectory(msg.host);
+    if (!entries.length) {
+      const base = baseHost(msg.host);
+      if (base && base !== msg.host.replace(/^www\./, "")) entries = await fetchDirectory(base);
     }
-    return { entries: [] };
+    return { entries };
   }
   if (msg.type === "page-links") {
     // Legal links visible on the current page (footer Terms/Privacy etc.).
@@ -120,6 +121,28 @@ async function handle(msg, sender) {
     }
   }
   return { ok: false, detail: "unknown message" };
+}
+
+async function fetchDirectory(host) {
+  try {
+    const response = await fetch(`${API_BASE}/v1/directory?host=${encodeURIComponent(host)}`, {
+      signal: AbortSignal.timeout(8000),
+    });
+    if (response.ok) return (await response.json()).entries ?? [];
+  } catch {
+    /* offline / blocked — the page-links half of the popup still renders */
+  }
+  return [];
+}
+
+// app.foo.example.com -> example.com; keeps three labels for common
+// second-level suffixes (example.co.uk). Heuristic only — a miss just means
+// no extra directory rows, never an error.
+function baseHost(host) {
+  const labels = host.replace(/^www\./, "").split(".");
+  if (labels.length <= 2) return null;
+  const take = /^(co|com|net|org|gov|edu|ac)$/.test(labels[labels.length - 2]) ? 3 : 2;
+  return labels.length > take ? labels.slice(-take).join(".") : null;
 }
 
 // Last-resort reader for documents the SERVER can't fetch (bot walls,
@@ -191,6 +214,10 @@ async function grabText(tabId) {
 }
 
 async function summarize({ url, language, clientContent }) {
+  // One key per document: location.href arrives with fragments/tracking params
+  // that the server strips anyway — normalizing here keeps the L1 cache from
+  // storing terms#a and terms#b as different entries.
+  url = yoolaNormalizeUrl(url) ?? url;
   const key = `l1:${url}:${language}`;
   const cached = (await chrome.storage.local.get(key))[key];
   if (cached && !isStale(cached.payload)) {
@@ -231,8 +258,12 @@ async function summarize({ url, language, clientContent }) {
     if (response.status === 502 && !clientContent) return { ok: false, needClientContent: true };
     if (response.status === 202)
       return { ok: false, detail: "Busy right now — the daily limit was reached. Try again later." };
-    if (response.status === 422)
-      return { ok: false, detail: "This page doesn't look like a legal agreement." };
+    if (response.status === 422) {
+      // Remember the verdict so this URL stops being offered as a candidate
+      // (in the popup and pickers). Right-click still allows a manual retry.
+      await rememberNotLegal(url);
+      return { ok: false, code: 422, detail: "This page doesn't look like a legal agreement." };
+    }
     if (response.status === 429)
       return { ok: false, detail: "Daily limit reached for your connection. Cached pages still work." };
     if (response.status === 503)
@@ -257,6 +288,20 @@ async function report({ docVersion, category }) {
   } catch {
     return { ok: false };
   }
+}
+
+// URLs the server judged "not a legal agreement" (422). Kept so lists stop
+// offering them; capped, oldest pruned first.
+const NOT_LEGAL_MAX = 200;
+async function rememberNotLegal(url) {
+  const { notLegal = {} } = await chrome.storage.local.get("notLegal");
+  notLegal[url] = Date.now();
+  const keys = Object.keys(notLegal);
+  if (keys.length > NOT_LEGAL_MAX) {
+    keys.sort((a, b) => notLegal[a] - notLegal[b]);
+    for (const key of keys.slice(0, keys.length - NOT_LEGAL_MAX)) delete notLegal[key];
+  }
+  await chrome.storage.local.set({ notLegal });
 }
 
 async function syncRegistry() {

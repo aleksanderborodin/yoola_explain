@@ -35,6 +35,10 @@ in `extension/background.js`.
   the capped background regeneration on model change isn't implemented yet.
 - **Translation budget**: `translate` calls are cheap and not gated by the
   per-IP miss budget today; add a separate cheap-op budget if abused.
+- **Server-side negative cache for 422 verdicts**: a URL judged
+  not-a-legal-agreement is remembered per-browser (extension `notLegal`), but
+  each NEW user still costs a fetch + `classify_legal`. A TTL'd server-side
+  `url_key → not_legal` record would cut that repeat spend.
 
 ## Extension
 

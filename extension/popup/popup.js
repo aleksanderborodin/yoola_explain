@@ -31,17 +31,23 @@ async function init() {
   // Dedup by where the link LEADS, not the raw string: both sides are
   // normalized URLs, compared scheme/www-insensitively so a footer link and
   // the stored document key match even when they're written differently.
+  const pageLinks = page?.links ?? [];
   const knownKeys = new Set(entries.map((e) => looseKey(e.url)));
-  const candidates = (page?.links ?? []).filter((l) => !knownKeys.has(looseKey(l.url)));
+  const candidates = pageLinks.filter((l) => !knownKeys.has(looseKey(l.url)));
+
+  // One label per document, before AND after analysis: when the page links to
+  // a graded document, its human link text beats a filename-derived label.
+  const linkLabelByKey = new Map(pageLinks.map((l) => [looseKey(l.url), l.label]));
+  const entryLabel = (e) => linkLabelByKey.get(looseKey(e.url)) ?? pathLabel(e.url);
 
   // Everything the panel needs to re-show this list in-page ("← back").
   const dossier = [
-    ...entries.map((e) => ({ url: e.url, label: pathLabel(e.url), grade: e.grade, alerts: e.alerts })),
+    ...entries.map((e) => ({ url: e.url, label: entryLabel(e), grade: e.grade, alerts: e.alerts })),
     ...candidates.map((l) => ({ url: l.url, label: l.label, known: l.known })),
   ];
 
   list.innerHTML = "";
-  for (const entry of entries) list.appendChild(gradedRow(entry, tab, dossier));
+  for (const entry of entries) list.appendChild(gradedRow(entry, entryLabel(entry), tab, dossier));
   for (const link of candidates) list.appendChild(candidateRow(link, tab, dossier));
   if (!list.children.length) {
     list.innerHTML = `<div class="muted">No agreements found here yet. Open a terms or
@@ -54,8 +60,7 @@ function looseKey(url) {
   return url.replace(/^https?:\/\//, "").replace(/^www\./, "").replace(/\/+$/, "");
 }
 
-function gradedRow(entry, tab, dossier) {
-  const label = pathLabel(entry.url);
+function gradedRow(entry, label, tab, dossier) {
   const row = row_(
     `<span class="stamp g-${entry.grade}"><span>${entry.grade}</span></span>`,
     label,
@@ -110,8 +115,9 @@ function cannotRun() {
   button.textContent = "Can't run on this page";
   document.getElementById("fine").textContent =
     "Chrome doesn't let extensions run on this page type (PDF viewer, browser pages, " +
-    "the web store). For a PDF: go back to the page that links to it and right-click " +
-    "the link → Summarize linked document with Yoola.";
+    "the web store), so the panel can't open here. Visit any regular page on the site " +
+    "and click the row there — or right-click a link to the document → Summarize " +
+    "linked document with Yoola.";
 }
 
 function pathLabel(url) {

@@ -79,8 +79,10 @@ forces a paid regeneration (see Design v4 A2).
 ## GET /v1/directory?limit=…&host=…
 
 Public browse list for the website (the site home page): one row per
-server-verified, non-disputed URL. With `host=` (www-insensitive), only that
-site's documents — the extension popup's "agreements on this site" source.
+server-verified, non-disputed URL. With `host=` (www-insensitive, matches the
+host **and its subdomains** — terms often live on legal.example.com while the
+user stands on app.example.com), only that site's documents — the extension
+popup's "agreements on this site" source.
 
 ```json
 { "entries": [ { "url": "https://…", "grade": "C", "alerts": 6,

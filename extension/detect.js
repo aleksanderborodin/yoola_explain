@@ -80,14 +80,18 @@ async function yoolaInRegistry(href) {
 // same normalize-and-hash membership check as detection, applied to the link
 // target. (Registry keys are requested-URL hashes, so a link that only reaches
 // a known document through a redirect won't match here — the server's alias
-// map still resolves it instantly on click.)
+// map still resolves it instantly on click.) Links the server judged NOT a
+// legal agreement (422, remembered by the worker) are dropped entirely —
+// never re-offered as candidates.
 async function yoolaMarkKnown(links) {
+  const { notLegal = {} } = await chrome.storage.local.get("notLegal");
+  const kept = links.filter((link) => !(link.url in notLegal));
   await Promise.all(
-    links.map(async (link) => {
+    kept.map(async (link) => {
       link.known = await yoolaInRegistry(link.url);
     })
   );
-  return links;
+  return kept;
 }
 
 // Consent-moment detection: a page that ASKS you to accept terms (signup/checkout)
@@ -146,8 +150,8 @@ async function yoolaDetect() {
   if (yoolaCheapGate() && yoolaDensityScan()) return { kind: "heuristic", links: [] };
   if (await yoolaInRegistry(location.href)) return { kind: "registry", links: [] };
   if (yoolaConsentContext()) {
-    const links = yoolaFindLegalLinks();
-    if (links.length) return { kind: "links", links: await yoolaMarkKnown(links) };
+    const links = await yoolaMarkKnown(yoolaFindLegalLinks());
+    if (links.length) return { kind: "links", links };
   }
   return null;
 }

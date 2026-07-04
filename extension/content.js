@@ -103,6 +103,9 @@
   // moment) or the popup's dossier for this site. Rows carry a grade stamp
   // when Yoola has already graded them, and a "known" note when the registry
   // says a summary exists (opens instantly from cache either way).
+  // The list is LIVE: after a document is analyzed its row carries the fresh
+  // grade when the user comes back (←), and a document the server judged NOT
+  // a legal agreement is removed from the list entirely, not left as a "?".
   function showPicker(links, opts = {}) {
     const body = openPanel();
     body.innerHTML = `
@@ -110,12 +113,16 @@
       <p class="pick-intro">${escapeHtml(opts.intro ?? "This page asks you to accept legal documents. Pick one to review — you won't leave this page.")}</p>
       <div class="picks"></div>`;
     const box = body.querySelector(".picks");
+    if (!links.length) {
+      box.innerHTML = `<p class="pick-intro">Nothing left to review here.</p>`;
+      return;
+    }
     for (const link of links) {
       const button = document.createElement("button");
       button.className = "pick";
       const host = new URL(link.url).hostname;
       const note = link.grade
-        ? `${VERDICT[link.grade] ?? "Graded"} · ${host}`
+        ? `${VERDICT[link.grade] ?? "Graded"} · ${link.alerts ?? 0} alert${link.alerts === 1 ? "" : "s"} · ${host}`
         : link.known
           ? `Already summarized — opens instantly · ${host}`
           : host;
@@ -125,9 +132,20 @@
           <span class="pick-label">${escapeHtml(link.label)}</span>
           <span class="pick-host">${escapeHtml(note)}</span>
         </span>`;
-      button.addEventListener("click", () => {
+      button.addEventListener("click", async () => {
         const remote = yoolaNormalizeUrl(link.url) !== yoolaNormalizeUrl(location.href);
-        summarize({ url: link.url, label: link.label, remote }, () => showPicker(links, opts));
+        const back = () => showPicker(links, opts);
+        const reply = await summarize({ url: link.url, label: link.label, remote }, back);
+        if (reply?.ok && reply.payload) {
+          link.grade = reply.payload.grade;
+          link.alerts = reply.payload.categories.filter(
+            (c) => c.status === "present" && (c.severity === "high" || c.severity === "medium")
+          ).length;
+          link.known = false;
+        } else if (reply?.code === 422) {
+          const at = links.indexOf(link);
+          if (at !== -1) links.splice(at, 1);
+        }
       });
       box.appendChild(button);
     }
@@ -156,7 +174,7 @@
         clientContent = grab?.ok ? grab.content : null;
         if (!clientContent) {
           body.innerHTML = `<div class="notice err">That document can't be read automatically — the site blocks robots and the page couldn't be read in a tab either (this happens with PDFs and some app-only pages). Open it yourself and run Yoola there.</div>`;
-          return;
+          return null;
         }
       } else {
         body.innerHTML = `<div class="loading"><span class="spin"></span>Site blocks our reader — sending the page text…</div>`;
@@ -166,9 +184,10 @@
     }
     if (!reply?.ok) {
       body.innerHTML = `<div class="notice err">${escapeHtml(reply?.detail || "Something went wrong.")}</div>`;
-      return;
+      return reply; // callers (pickers) react to the outcome, e.g. code 422
     }
     render(body, reply.payload, reply.fromL1, target);
+    return reply;
   }
 
   function render(body, s, fromL1, target) {

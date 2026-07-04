@@ -415,3 +415,43 @@ def test_directory_host_filter_is_www_insensitive(make_client):
         via_www = client.get("/v1/directory", params={"host": "www.b-corp.com"}).json()["entries"]
         assert [e["url"] for e in via_www] == ["https://b-corp.com/terms"]
         assert client.get("/v1/directory", params={"host": "c.com"}).json()["entries"] == []
+
+
+def test_directory_host_filter_matches_subdomains(make_client):
+    """The popup may sit on app.example.com while the terms live on
+    example.com or legal.example.com — host= matches the whole site."""
+    provider = FakeProvider()
+    pages = {
+        "https://legal.a-corp.com/terms": html_page(SAMPLE_TOS),
+        "https://not-a-corp.com/terms": html_page(OTHER_TOS),
+    }
+    with make_client(provider, fetch_by_url(pages)) as client:
+        post(client, "https://legal.a-corp.com/terms")
+        post(client, "https://not-a-corp.com/terms")
+        entries = client.get("/v1/directory", params={"host": "a-corp.com"}).json()["entries"]
+        # subdomain matches; the lookalike suffix host must NOT leak in
+        assert [e["url"] for e in entries] == ["https://legal.a-corp.com/terms"]
+
+
+def test_concurrent_misses_for_same_url_generate_once(make_client):
+    """Invariant #1 under concurrency: N simultaneous clicks on the same
+    uncached URL serialize on the per-URL in-flight lock and pay for ONE
+    generation; everyone queued behind the winner gets the cache hit."""
+    import asyncio
+
+    from yoola.pipeline import request_summary
+
+    provider = FakeProvider()
+    with make_client(provider, fetch_returning(html_page(SAMPLE_TOS))) as client:
+        deps = client.app.state.deps
+
+        async def stampede():
+            return await asyncio.gather(
+                *(request_summary(deps, URL, "en", None, f"10.0.0.{i}") for i in range(5))
+            )
+
+        outcomes = asyncio.run(stampede())
+    assert all(o.status == 200 for o in outcomes)
+    assert provider.generate_calls == 1
+    assert sum(o.payload.source == "generated" for o in outcomes) == 1
+    assert sum(o.payload.source == "cache" for o in outcomes) == 4

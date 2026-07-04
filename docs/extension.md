@@ -16,10 +16,15 @@ file that touches the network.
    graded entries by **where the link leads** (normalized URL, compared
    scheme/www-insensitively) and each is checked against the registry digest —
    a registry hit renders as "✓ Already summarized — opens instantly" (e.g. a
-   link to another site's terms), the rest as "? not analyzed yet". Any row
-   opens the panel in-page; the panel header then shows **← back to the list**
-   (the popup passes its dossier along via `list`). "Summarize this page
-   instead" covers the rest.
+   link to another site's terms), the rest as "? not analyzed yet". Labels are
+   consistent before and after analysis: when the page links to a graded
+   document, its human link text is used instead of a filename-derived label.
+   Any row opens the panel in-page; the panel header then shows **← back to
+   the list** (the popup passes its dossier along via `list`), and the list is
+   LIVE — a just-analyzed row shows its grade on return, and a document the
+   server judged not-a-legal-agreement (422) is removed from all lists and
+   remembered (`notLegal` in storage, capped at 200; right-click still allows
+   a manual retry). "Summarize this page instead" covers the rest.
 3. **Right-click** — *Summarize this page with Yoola* on the page, or
    *Summarize linked document with Yoola* on a Terms/Privacy **link** — the
    linked doc is summarized without navigating (the server fetches by URL, so
@@ -79,15 +84,15 @@ file that touches the network.
 | type | direction | payload | reply |
 |------|-----------|---------|-------|
 | `detected` | content → bg | — | sets tab badge |
-| `summarize` | content → bg | `{url, language, clientContent?}` | `{ok, payload, fromL1?}` \| `{ok:false, needClientContent:true}` \| `{ok:false, detail}` |
+| `summarize` | content → bg | `{url, language, clientContent?}` | `{ok, payload, fromL1?}` \| `{ok:false, needClientContent:true}` \| `{ok:false, detail, code?}` — `code: 422` marks not-a-legal-agreement (worker also records it in `notLegal`); the URL is normalized in the worker so fragments/tracking params share one L1 entry |
 | `report` | content → bg | `{docVersion, category}` | `{ok}` |
 | `summarize-current` | bg → content (via `sendToContent`) | — | panel for the current page |
 | `summarize-url` | bg → content (via `sendToContent`) | `{url, label?, list?}` | panel for the linked document; local mode auto-detected when the URL is the current page; `list` (>1 items) enables the header's ← back-to-list |
 | `extract-remote` | content → bg | `{url}` | `{ok, content?}` — background-tab read of a document the server can't fetch; feeds the quarantined `client_content` path |
 | `popup-open-url` | popup → bg | `{tabId, url, label, list?}` | bg delivers `summarize-url` (injecting if needed) |
-| `site-agreements` | popup → bg | `{host}` | `{entries}` from `GET /v1/directory?host=` |
+| `site-agreements` | popup → bg | `{host}` | `{entries}` from `GET /v1/directory?host=` (server matches subdomains; on zero entries the worker retries from the site's base domain) |
 | `page-links` | popup → bg | `{tabId}` | `{links}` via content `get-legal-links` |
-| `get-legal-links` | bg → content | — | `{links}` from `yoolaFindLegalLinks()`, each stamped `known` against the registry digest |
+| `get-legal-links` | bg → content | — | `{links}` from `yoolaFindLegalLinks()`, each stamped `known` against the registry digest; remembered non-agreements (`notLegal`) are dropped |
 | `popup-summarize` | popup → bg | `{tabId}` | `{ok}` — bg delivers `summarize-current`, injecting the content script first if the tab predates the last extension reload (`scripting` permission); `ok:false` only on genuinely uninjectable pages |
 
 ## L1 cache

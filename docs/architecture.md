@@ -10,7 +10,8 @@ before expensive, every gate before the one LLM call.
 |---|-------|--------|-----------|
 | 1 | URL normalize (params sorted for cache-key stability) | `urltools.normalize_url` | 400 |
 | 2 | URL cache (fresh per `url_ttl_days`) | `store.get_url_entry` | — (miss ⇒ continue) |
-| 3 | Global fetch budget, then server fetch (SSRF-guarded, manual redirects, size-capped) | `store` + `fetch.fetch_page` | 503 (budget) / fallback to `client_content` (quarantined) or 502 |
+| 2b | **Per-URL in-flight lock**: concurrent misses for one URL serialize and re-check the cache under the lock, so N simultaneous clicks pay for ONE generation (invariant #1; in-process suffices — SQLite pins us to one worker) | `pipeline` (`Deps.inflight`) | — |
+| 3 | Global fetch budget, then server fetch (browser-like headers — CDN bot walls 403 self-identified bots; SSRF-guarded, manual redirects, size-capped) | `store` + `fetch.fetch_page` | 503 (budget) / fallback to `client_content` (quarantined) or 502 |
 | 4 | Extract text **in a worker thread** — trafilatura for HTML, pypdf for PDFs (legal docs often ship as PDFs) | `asyncio.to_thread(extract_main_text / extract_pdf_text)` | scanned/corrupt PDF ⇒ empty text ⇒ 422 at stage 7 |
 | 5 | Size gate (`content_max_chars`) | pipeline | 413 |
 | 6 | `doc_version` cache (hash of canonical text, alias-resolved) | `identity` + `store` | — (hit ⇒ serve; verified fetch upgrades quarantined entries) |

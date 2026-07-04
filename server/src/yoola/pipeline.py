@@ -7,7 +7,7 @@ marked source_verified=0, served only on byte-identical content).
 
 import asyncio
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Awaitable, Callable
 
 from . import metrics
@@ -45,6 +45,11 @@ class Deps:
     settings: Settings
     taxonomy: tuple[Category, ...]
     fetch_fn: FetchFn  # injectable for tests
+    # Per-URL in-flight locks: concurrent misses for the same URL serialize so
+    # a document is paid for at most once even when many users click at the
+    # same moment (invariant #1). In-process is enough — SQLite pins the
+    # deployment to ONE worker (docs/deploy.md).
+    inflight: dict[str, asyncio.Lock] = field(default_factory=dict)
 
 
 @dataclass
@@ -91,14 +96,40 @@ async def request_summary(
     except UrlError as e:
         return Outcome(400, detail=str(e))
 
-    entry = deps.store.get_url_entry(url_key)
-    if entry is not None and deps.store.url_entry_fresh(entry, deps.settings.url_ttl_days):
-        doc = deps.store.get_summary(deps.store.resolve_doc_version(entry["doc_version"]))
-        if doc is not None:
-            metrics.inc("cache_hit_post")
-            return await _serve(deps, doc, url_key, language)
+    hit = await _serve_url_cache(deps, url_key, language)
+    if hit is not None:
+        return hit
 
-    # Miss (or stale): the server observes the content itself (v4 C1).
+    # Miss (or stale): serialize per URL, and re-check the cache under the
+    # lock — the concurrent request that got here first has generated (and
+    # paid for) the document; everyone queued behind it gets the cache hit.
+    lock = deps.inflight.setdefault(url_key, asyncio.Lock())
+    try:
+        async with lock:
+            hit = await _serve_url_cache(deps, url_key, language)
+            if hit is not None:
+                return hit
+            return await _request_miss(deps, url_key, language, client_content, ip)
+    finally:
+        if not lock.locked():
+            deps.inflight.pop(url_key, None)
+
+
+async def _serve_url_cache(deps: Deps, url_key: str, language: str) -> Outcome | None:
+    entry = deps.store.get_url_entry(url_key)
+    if entry is None or not deps.store.url_entry_fresh(entry, deps.settings.url_ttl_days):
+        return None
+    doc = deps.store.get_summary(deps.store.resolve_doc_version(entry["doc_version"]))
+    if doc is None:
+        return None
+    metrics.inc("cache_hit_post")
+    return await _serve(deps, doc, url_key, language)
+
+
+async def _request_miss(
+    deps: Deps, url_key: str, language: str, client_content: str | None, ip: str
+) -> Outcome:
+    # The server observes the content itself (v4 C1).
     try:
         if deps.store.increment_budget("fetch:global") > deps.settings.global_daily_fetch_budget:
             metrics.inc("rejected_fetch_budget")
