@@ -12,7 +12,7 @@
     "default_popup": "popup/popup.html",
     "default_icon": { "16": "images/icon16.png", "48": "images/icon48.png" }
   },
-  "permissions": ["storage", "activeTab", "contextMenus", "alarms"],
+  "permissions": ["storage", "activeTab", "contextMenus", "alarms", "scripting"],
   "host_permissions": ["http://127.0.0.1:8000/*", "https://yoola-explain.aleksanderbor.ru/*"],
   "background": { "service_worker": "background.js" },
   "content_scripts": [

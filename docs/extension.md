@@ -60,8 +60,9 @@ file that touches the network.
 | `detected` | content → bg | — | sets tab badge |
 | `summarize` | content → bg | `{url, language, clientContent?}` | `{ok, payload, fromL1?}` \| `{ok:false, needClientContent:true}` \| `{ok:false, detail}` |
 | `report` | content → bg | `{docVersion, category}` | `{ok}` |
-| `summarize-current` | popup/bg/context-menu → content | — | panel for the current page |
-| `summarize-url` | bg (link context-menu) → content | `{url}` | panel for the linked document (remote mode) |
+| `summarize-current` | bg → content (via `sendToContent`) | — | panel for the current page |
+| `summarize-url` | bg (link context-menu) → content (via `sendToContent`) | `{url}` | panel for the linked document (remote mode) |
+| `popup-summarize` | popup → bg | `{tabId}` | `{ok}` — bg delivers `summarize-current`, injecting the content script first if the tab predates the last extension reload (`scripting` permission); `ok:false` only on genuinely uninjectable pages |
 
 ## L1 cache
 

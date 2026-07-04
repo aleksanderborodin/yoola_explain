@@ -29,11 +29,27 @@ chrome.alarms.onAlarm.addListener((a) => a.name === "yoola-registry" && syncRegi
 chrome.contextMenus.onClicked.addListener((info, tab) => {
   if (tab?.id == null) return;
   if (info.menuItemId === "yoola-summarize") {
-    chrome.tabs.sendMessage(tab.id, { type: "summarize-current" });
+    sendToContent(tab.id, { type: "summarize-current" });
   } else if (info.menuItemId === "yoola-summarize-link" && info.linkUrl) {
-    chrome.tabs.sendMessage(tab.id, { type: "summarize-url", url: info.linkUrl });
+    sendToContent(tab.id, { type: "summarize-url", url: info.linkUrl });
   }
 });
+
+// Deliver a message to the tab's content script, injecting it first if it's
+// missing (after an extension reload, existing tabs lose their content scripts;
+// they must self-heal rather than tell the user to refresh). Throws only where
+// injection is impossible (chrome:// pages, the PDF viewer, the web store).
+async function sendToContent(tabId, msg) {
+  try {
+    return await chrome.tabs.sendMessage(tabId, msg);
+  } catch {
+    await chrome.scripting.executeScript({
+      target: { tabId },
+      files: ["detect.js", "content.js"],
+    });
+    return await chrome.tabs.sendMessage(tabId, msg);
+  }
+}
 
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   handle(msg, sender).then(sendResponse);
@@ -50,6 +66,14 @@ async function handle(msg, sender) {
   }
   if (msg.type === "summarize") return summarize(msg);
   if (msg.type === "report") return report(msg);
+  if (msg.type === "popup-summarize") {
+    try {
+      await sendToContent(msg.tabId, { type: "summarize-current" });
+      return { ok: true };
+    } catch {
+      return { ok: false }; // genuinely uninjectable page (PDF viewer, chrome://)
+    }
+  }
   return { ok: false, detail: "unknown message" };
 }
 
