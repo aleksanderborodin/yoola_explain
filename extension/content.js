@@ -19,11 +19,35 @@
   const VERDICT = { A: "Fair terms", B: "Mostly fair", C: "Mixed terms", D: "Harsh terms", E: "Very harsh" };
   let shadow = null;
 
-  yoolaDetect().then((hit) => {
+  yoolaDetect().then(async (hit) => {
     if (!hit) return;
-    chrome.runtime.sendMessage({ type: "detected" });
-    mountTab(hit.kind, hit.links);
+    chrome.runtime.sendMessage({ type: "detected" }); // badge always lights — it's the quiet signal
+    if (!(await pillMuted())) mountTab(hit.kind);
   });
+
+  // Per-host pill frequency cap: a user who dismissed the pill (30 days) or
+  // already opened the dossier from it (7 days) isn't nagged again on every
+  // page of the site — the toolbar badge + popup stay available throughout.
+  async function pillMuted() {
+    try {
+      const { pillMute = {} } = await chrome.storage.local.get("pillMute");
+      const until = pillMute[location.hostname];
+      return until != null && until > Date.now();
+    } catch {
+      return false;
+    }
+  }
+
+  async function mutePill(days) {
+    const { pillMute = {} } = await chrome.storage.local.get("pillMute");
+    pillMute[location.hostname] = Date.now() + days * 864e5;
+    const hosts = Object.keys(pillMute);
+    if (hosts.length > 300) {
+      hosts.sort((a, b) => pillMute[a] - pillMute[b]);
+      for (const h of hosts.slice(0, hosts.length - 300)) delete pillMute[h];
+    }
+    await chrome.storage.local.set({ pillMute });
+  }
 
   chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     if (msg.type === "summarize-current") summarize();
@@ -62,19 +86,70 @@
     links: "Check the terms first?",
   };
 
-  function mountTab(kind, links) {
+  // The pill opens the SAME site dossier as the toolbar popup — one surface,
+  // whatever the way in. Dismiss (✕) mutes it on this host for 30 days;
+  // opening it mutes the auto-pill for 7 (the badge/popup remain).
+  function mountTab(kind) {
     const root = ui();
     root.querySelector(".tab")?.remove();
-    const tab = document.createElement("button");
+    const tab = document.createElement("div");
     tab.className = "tab";
-    tab.innerHTML = `<span class="mark">Yoola</span><span class="tab-msg">${TAB_MSG[kind]}</span>`;
-    tab.addEventListener("click", () => {
+    tab.setAttribute("role", "button");
+    tab.tabIndex = 0;
+    tab.innerHTML = `
+      <span class="mark">Yoola</span><span class="tab-msg">${TAB_MSG[kind]}</span>
+      <button class="tab-x" title="Hide on this site" aria-label="Hide on this site">✕</button>`;
+    const open = () => {
       tab.remove();
-      if (kind === "links" && links.length > 1) showPicker(links);
-      else if (kind === "links") summarize({ url: links[0].url, label: links[0].label, remote: true });
-      else summarize();
+      mutePill(7);
+      showDossier(kind);
+    };
+    tab.addEventListener("click", open);
+    tab.addEventListener("keydown", (e) => (e.key === "Enter" || e.key === " ") && open());
+    tab.querySelector(".tab-x").addEventListener("click", (e) => {
+      e.stopPropagation();
+      tab.remove();
+      mutePill(30);
     });
     root.appendChild(tab);
+  }
+
+  // The dossier view: everything this site asks you to agree to, built by the
+  // worker (same rows as the popup). The current page is pinned first when it
+  // is itself one of the documents.
+  async function showDossier(kind) {
+    const body = openPanel();
+    body.innerHTML = `<div class="loading"><span class="spin"></span>Looking around…</div>`;
+    let rows = [];
+    try {
+      const links = await yoolaMarkKnown(yoolaFindLegalLinks());
+      const reply = await chrome.runtime.sendMessage({
+        type: "site-dossier",
+        host: location.hostname,
+        links,
+      });
+      rows = reply?.rows ?? links;
+    } catch {
+      /* worker unreachable — fall through to just the current page */
+    }
+    const curKey = yoolaLooseKey(yoolaNormalizeUrl(location.href));
+    const curAt = rows.findIndex((r) => yoolaLooseKey(r.url) === curKey);
+    if (curAt !== -1) {
+      const [cur] = rows.splice(curAt, 1);
+      cur.current = true;
+      rows.unshift(cur);
+    } else if (kind === "heuristic" || kind === "registry") {
+      rows.unshift({
+        url: location.href,
+        label: (document.title || "This page").trim().slice(0, 70),
+        known: kind === "registry",
+        current: true,
+      });
+    }
+    showPicker(rows, {
+      title: `On ${location.hostname.replace(/^www\./, "")}`,
+      intro: "Everything this site asks you to agree to.",
+    });
   }
 
   // onBack: when set, the header shows "←" returning to the list the user
@@ -120,12 +195,13 @@
     for (const link of links) {
       const button = document.createElement("button");
       button.className = "pick";
-      const host = new URL(link.url).hostname;
-      const note = link.grade
+      const host = new URL(link.url, location.href).hostname;
+      let note = link.grade
         ? `${VERDICT[link.grade] ?? "Graded"} · ${link.alerts ?? 0} alert${link.alerts === 1 ? "" : "s"} · ${host}`
         : link.known
           ? `Already summarized — opens instantly · ${host}`
           : host;
+      if (link.current) note = `This page · ${note}`;
       button.innerHTML = `
         ${link.grade ? `<span class="pick-stamp g-${escapeHtml(link.grade)}"><span>${escapeHtml(link.grade)}</span></span>` : ""}
         <span class="pick-txt">
@@ -148,6 +224,16 @@
         }
       });
       box.appendChild(button);
+    }
+    if (!links.some((l) => l.current)) {
+      // Same escape hatch as the popup, so the two surfaces stay identical.
+      const self = document.createElement("button");
+      self.className = "pick-self";
+      self.textContent = "Summarize this page instead";
+      self.addEventListener("click", () =>
+        summarize({ url: location.href, remote: false }, () => showPicker(links, opts))
+      );
+      body.appendChild(self);
     }
   }
 
@@ -332,11 +418,16 @@
       display: flex; flex-direction: column; align-items: flex-start; gap: 2px;
       background: var(--paper); color: var(--ink); cursor: pointer;
       border: 1px solid var(--line); border-right: none;
-      border-radius: 12px 0 0 12px; padding: 10px 15px 10px 13px;
+      border-radius: 12px 0 0 12px; padding: 10px 26px 10px 13px;
       box-shadow: -6px 6px 22px rgba(60,50,20,.18);
       border-left: 3px solid var(--brass-soft);
     }
     .tab:hover { background: var(--card); }
+    .tab-x {
+      position: absolute; top: 3px; right: 5px; background: none; border: none;
+      color: var(--ink3); font-size: 10px; cursor: pointer; padding: 3px; line-height: 1;
+    }
+    .tab-x:hover { color: var(--ink); }
     .tab .mark {
       font-family: "Iowan Old Style", Palatino, Georgia, serif;
       font-weight: 700; font-size: 15px; letter-spacing: .3px; color: var(--ink);
@@ -388,6 +479,11 @@
     .pick-txt { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
     .pick-label { font-weight: 600; font-size: 13.5px; word-break: break-word; }
     .pick-host { color: var(--ink3); font-size: 11.5px; }
+    .pick-self {
+      background: none; border: none; color: var(--ink2); cursor: pointer;
+      font-size: 12px; padding: 10px 0 0; text-decoration: underline; text-underline-offset: 3px;
+    }
+    .pick-self:hover { color: var(--ink); }
     .pick-stamp { flex: none; width: 32px; height: 32px; border-radius: 50%;
       border: 2px solid currentColor; display: grid; place-items: center;
       transform: rotate(-6deg); position: relative;

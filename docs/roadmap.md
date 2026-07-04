@@ -45,6 +45,11 @@ in `extension/background.js`.
 - `API_BASE` as an options-page setting; Firefox (WebExtensions) port;
   text-fragment (`#:~:text=`) highlighting as a `window.find` fallback;
   proper Readability extraction if the fallback path ever matters.
+- **UI localization**: panel/popup/pill strings are English-only today (the
+  SUMMARIES already translate server-side per `lang`). Move strings to
+  `_locales/` + `chrome.i18n`, en/ru first — the string set is small and
+  already centralized (`TAB_MSG`, `VERDICT`, notices), so this is mechanical.
+  The website (`site/`) localizes separately.
 
 ## Testing
 

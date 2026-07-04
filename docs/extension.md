@@ -6,13 +6,21 @@ file that touches the network.
 
 ## Triggers (three ways in)
 
-1. **Detection tab** — appears bottom-right when the page is detected (see below).
-   On a consent page it reads *Check the terms first?* and summarizes the
-   **linked** documents in place (a picker appears when there are several).
+All three land on the SAME view — the **site dossier**, built in one place
+(`background.js#buildDossier`) so the surfaces can never drift apart.
+
+1. **Detection tab (the pill)** — appears bottom-right when the page is
+   detected (see below). Clicking it opens the site dossier in the panel, with
+   the current page pinned first when the page itself is a legal document
+   (heuristic/registry detection). The pill is **frequency-capped per host**:
+   its ✕ mutes it on that site for 30 days, opening it mutes the auto-pill
+   for 7 — the toolbar badge and popup always remain (`pillMute` in storage,
+   capped at 300 hosts).
 2. **Popup — the site dossier.** Clicking the icon lists ALL agreements for
    the current site: documents Yoola has already graded for this host (via
    `GET /v1/directory?host=`, instant, with grade stamps) merged with legal
-   links found on the current page. Candidates are deduplicated against the
+   links found on the current page (both via the worker's `site-dossier`).
+   Candidates are deduplicated against the
    graded entries by **where the link leads** (normalized URL, compared
    scheme/www-insensitively) and each is checked against the registry digest —
    a registry hit renders as "✓ Already summarized — opens instantly" (e.g. a
@@ -63,8 +71,10 @@ file that touches the network.
   `scripting.executeScript` self-heal and the background-tab reader; adds no
   install warning beyond the one the content scripts already trigger).
 - `detect.js` — detection, URL normalization (mirrors the server), registry
-  lookup, and the crude `<main>/<article>/body` fallback extractor
-  (`yoolaExtractText`, used ONLY for the server-fetch-failed path).
+  lookup, shared URL helpers (`yoolaLooseKey`, `yoolaPathLabel` — loaded by
+  the worker via `importScripts` too), and the crude `<main>/<article>/body`
+  fallback extractor (`yoolaExtractText`, used ONLY for the server-fetch-failed
+  path).
 - `content.js` — the detection tab + the shadow-DOM "dossier" panel: the
   **verdict stamp** (A–E seal, the signature element), alerts-first cards,
   in-brief bullets, collapsible full checklist, disputed/unverified warnings,
@@ -90,7 +100,7 @@ file that touches the network.
 | `summarize-url` | bg → content (via `sendToContent`) | `{url, label?, list?}` | panel for the linked document; local mode auto-detected when the URL is the current page; `list` (>1 items) enables the header's ← back-to-list |
 | `extract-remote` | content → bg | `{url}` | `{ok, content?}` — background-tab read of a document the server can't fetch; feeds the quarantined `client_content` path |
 | `popup-open-url` | popup → bg | `{tabId, url, label, list?}` | bg delivers `summarize-url` (injecting if needed) |
-| `site-agreements` | popup → bg | `{host}` | `{entries}` from `GET /v1/directory?host=` (server matches subdomains; on zero entries the worker retries from the site's base domain) |
+| `site-dossier` | popup/content → bg | `{host, links}` | `{rows}` — THE dossier builder: directory entries for the host (server matches subdomains; on zero entries retries from the site's base domain) merged + deduped with the page's legal links, labels unified |
 | `page-links` | popup → bg | `{tabId}` | `{links}` via content `get-legal-links` |
 | `get-legal-links` | bg → content | — | `{links}` from `yoolaFindLegalLinks()`, each stamped `known` against the registry digest; remembered non-agreements (`notLegal`) are dropped |
 | `popup-summarize` | popup → bg | `{tabId}` | `{ok}` — bg delivers `summarize-current`, injecting the content script first if the tab predates the last extension reload (`scripting` permission); `ok:false` only on genuinely uninjectable pages |

@@ -156,6 +156,29 @@ async function yoolaDetect() {
   return null;
 }
 
+// Scheme/www/trailing-slash-insensitive comparison key for a normalized URL —
+// how "where does this link LEAD" is compared across directory entries,
+// page links, and the current page.
+function yoolaLooseKey(url) {
+  return (url ?? "").replace(/^https?:\/\//, "").replace(/^www\./, "").replace(/\/+$/, "");
+}
+
+// Human label from a URL path (decoded filename, de-underscored) — the
+// fallback when no page link supplies real link text.
+function yoolaPathLabel(url) {
+  try {
+    const u = new URL(url);
+    const segment = decodeURIComponent(u.pathname.split("/").filter(Boolean).pop() ?? "");
+    const cleaned = segment
+      .replace(/\.(pdf|docx?|html?|php|aspx?)$/i, "")
+      .replace(/[_\-+]+/g, " ")
+      .trim();
+    return cleaned || u.hostname.replace(/^www\./, "");
+  } catch {
+    return url;
+  }
+}
+
 // Fallback extractor — used ONLY when the server can't fetch (quarantined path).
 function yoolaExtractText() {
   const root =

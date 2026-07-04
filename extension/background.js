@@ -90,17 +90,10 @@ async function handle(msg, sender) {
     }
   }
   if (msg.type === "extract-remote") return extractViaTab(msg.url);
-  if (msg.type === "site-agreements") {
-    // What Yoola already knows about this host — instant, graded. The server
-    // matches the host and its subdomains; when the user stands on a deep
-    // subdomain (app.foo.example.com) with no entries, retry from the site's
-    // base domain so terms living on example.com still show up.
-    let entries = await fetchDirectory(msg.host);
-    if (!entries.length) {
-      const base = baseHost(msg.host);
-      if (base && base !== msg.host.replace(/^www\./, "")) entries = await fetchDirectory(base);
-    }
-    return { entries };
+  if (msg.type === "site-dossier") {
+    // THE one dossier builder — the popup and the in-page panel both render
+    // exactly this, so the two surfaces can never drift apart.
+    return buildDossier(msg.host, msg.links ?? []);
   }
   if (msg.type === "page-links") {
     // Legal links visible on the current page (footer Terms/Privacy etc.).
@@ -121,6 +114,35 @@ async function handle(msg, sender) {
     }
   }
   return { ok: false, detail: "unknown message" };
+}
+
+// The site dossier: graded directory entries for this host merged with the
+// legal links found on the page. Dedup is by where a link LEADS (loose key on
+// normalized URLs); a graded entry keeps the page's human link text when the
+// page links to it, so a row reads the same before and after analysis.
+async function buildDossier(host, links) {
+  let entries = host ? await fetchDirectory(host) : [];
+  if (host && !entries.length) {
+    // Deep subdomain with no entries of its own — retry from the site's base
+    // domain (the server matches subdomains, so this catches example.com
+    // terms while the user stands on app.foo.example.com).
+    const base = baseHost(host);
+    if (base && base !== host.replace(/^www\./, "")) entries = await fetchDirectory(base);
+  }
+  const labelByKey = new Map(links.map((l) => [yoolaLooseKey(l.url), l.label]));
+  const knownKeys = new Set(entries.map((e) => yoolaLooseKey(e.url)));
+  const rows = [
+    ...entries.map((e) => ({
+      url: e.url,
+      label: labelByKey.get(yoolaLooseKey(e.url)) ?? yoolaPathLabel(e.url),
+      grade: e.grade,
+      alerts: e.alerts,
+    })),
+    ...links
+      .filter((l) => !knownKeys.has(yoolaLooseKey(l.url)))
+      .map((l) => ({ url: l.url, label: l.label, known: l.known })),
+  ];
+  return { rows };
 }
 
 async function fetchDirectory(host) {
