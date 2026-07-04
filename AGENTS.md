@@ -59,8 +59,9 @@ Read this file first, then follow the path for your task. Skim
   reading, the "Yoola explains Yoola" dogfood section) and
   `docs/legal/terms-of-service.md` (our own deliberately lawyer-grade ToS —
   also the dogfood input; regenerate the user-guide summary if you change it).
-- **Deploy / hosting** → `server.md` (gitignored: SSH creds + box inventory) →
-  `docs/roadmap.md` "Deploy" for the plan.
+- **Deploy / hosting** → `docs/deploy.md` (uv + systemd + Caddy; the one-shot
+  script is `deploy/server-setup.sh`) → `server.md` (gitignored: SSH creds +
+  box inventory).
 - **Understand scope / what's deliberately NOT built** → `Yoola_Design_v4.md`
   Part I + `docs/roadmap.md`.
 
